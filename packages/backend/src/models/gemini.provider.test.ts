@@ -2,48 +2,40 @@ import { test, expect, describe, mock, beforeEach } from "bun:test";
 import type { ChatMessage, ChatOptions } from "./types";
 
 // ---------------------------------------------------------------------------
-// Mocks — we mock the entire @google/generative-ai module so we never
-// hit the real API.  The mock mirrors the SDK's shape just enough for
-// our provider code.
+// Mocks — we mock `ai` and `@ai-sdk/google` so we never hit the real API.
 // ---------------------------------------------------------------------------
 
-const mockGenerateContent = mock(() =>
+const mockGenerateText = mock(() =>
   Promise.resolve({
-    response: {
-      text: () => "Hello from Gemini!",
-      usageMetadata: {
-        promptTokenCount: 10,
-        candidatesTokenCount: 5,
-        totalTokenCount: 15,
-      },
+    text: "Hello from Gemini!",
+    usage: {
+      inputTokens: 10,
+      outputTokens: 5,
+      totalTokens: 15,
     },
   }),
 );
 
-async function* fakeStream() {
-  yield { text: () => "Hello" };
-  yield { text: () => " world" };
+async function* fakeTextStream() {
+  yield "Hello";
+  yield " world";
 }
 
-const mockGenerateContentStream = mock(() =>
-  Promise.resolve({
-    stream: fakeStream(),
-    response: Promise.resolve({ text: () => "Hello world" }),
-  }),
-);
-
-const mockGetGenerativeModel = mock(() => ({
-  generateContent: mockGenerateContent,
-  generateContentStream: mockGenerateContentStream,
+const mockStreamText = mock(() => ({
+  textStream: fakeTextStream(),
 }));
 
-mock.module("@google/generative-ai", () => ({
-  GoogleGenerativeAI: class {
-    constructor(_apiKey: string) {
-      void _apiKey;
-    }
-    getGenerativeModel = mockGetGenerativeModel;
-  },
+const mockGoogleModel = mock((_modelId: string) => `mock-model:${_modelId}`);
+
+const mockCreateGoogleGenerativeAI = mock((_opts: { apiKey: string }) => mockGoogleModel);
+
+mock.module("ai", () => ({
+  generateText: mockGenerateText,
+  streamText: mockStreamText,
+}));
+
+mock.module("@ai-sdk/google", () => ({
+  createGoogleGenerativeAI: mockCreateGoogleGenerativeAI,
 }));
 
 // Import *after* the mock is set up so the provider picks up the mock.
@@ -55,9 +47,15 @@ const { GeminiProvider } = await import("./gemini.provider");
 
 describe("GeminiProvider", () => {
   beforeEach(() => {
-    mockGenerateContent.mockClear();
-    mockGenerateContentStream.mockClear();
-    mockGetGenerativeModel.mockClear();
+    mockGenerateText.mockClear();
+    mockStreamText.mockClear();
+    mockGoogleModel.mockClear();
+    mockCreateGoogleGenerativeAI.mockClear();
+
+    // Reset mockStreamText to produce a fresh async generator each call.
+    mockStreamText.mockImplementation(() => ({
+      textStream: fakeTextStream(),
+    }));
   });
 
   test("constructor throws without API key", () => {
@@ -100,7 +98,7 @@ describe("GeminiProvider", () => {
       });
     });
 
-    test("passes system prompt via systemInstruction", async () => {
+    test("passes system prompt via system parameter", async () => {
       const provider = new GeminiProvider("test-key");
       const messages: ChatMessage[] = [
         { role: "system", content: "You are a helpful assistant." },
@@ -109,13 +107,17 @@ describe("GeminiProvider", () => {
 
       await provider.chat(messages);
 
-      expect(mockGetGenerativeModel).toHaveBeenCalledTimes(1);
-      const modelParams = mockGetGenerativeModel.mock.calls[0] as unknown as unknown[];
-      const firstArg = modelParams[0] as Record<string, unknown>;
-      expect(firstArg).toHaveProperty("systemInstruction");
+      expect(mockGenerateText).toHaveBeenCalledTimes(1);
+      const callArgs = mockGenerateText.mock.calls[0] as unknown as unknown[];
+      const firstArg = callArgs[0] as Record<string, unknown>;
+      expect(firstArg).toHaveProperty("system", "You are a helpful assistant.");
+      // System messages must be filtered from the messages array.
+      const msgs = firstArg["messages"] as Array<{ role: string }>;
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]?.role).toBe("user");
     });
 
-    test("passes ChatOptions to model", async () => {
+    test("passes ChatOptions to generateText", async () => {
       const provider = new GeminiProvider("test-key");
       const messages: ChatMessage[] = [{ role: "user", content: "Hi" }];
       const options: ChatOptions = {
@@ -127,17 +129,16 @@ describe("GeminiProvider", () => {
 
       await provider.chat(messages, options);
 
-      const modelParams = mockGetGenerativeModel.mock.calls[0] as unknown as unknown[];
-      const firstArg = modelParams[0] as Record<string, unknown>;
-      expect(firstArg).toHaveProperty("model", "gemini-1.5-pro");
-      expect(firstArg).toHaveProperty("systemInstruction");
+      expect(mockGoogleModel).toHaveBeenCalledWith("gemini-1.5-pro");
 
-      const genConfig = firstArg["generationConfig"] as Record<string, unknown>;
-      expect(genConfig).toHaveProperty("temperature", 0.5);
-      expect(genConfig).toHaveProperty("maxOutputTokens", 1024);
+      const callArgs = mockGenerateText.mock.calls[0] as unknown as unknown[];
+      const firstArg = callArgs[0] as Record<string, unknown>;
+      expect(firstArg).toHaveProperty("system", "Be brief.");
+      expect(firstArg).toHaveProperty("temperature", 0.5);
+      expect(firstArg).toHaveProperty("maxTokens", 1024);
     });
 
-    test("filters system messages from contents", async () => {
+    test("filters system messages from messages array", async () => {
       const provider = new GeminiProvider("test-key");
       const messages: ChatMessage[] = [
         { role: "system", content: "sys" },
@@ -147,12 +148,12 @@ describe("GeminiProvider", () => {
 
       await provider.chat(messages);
 
-      const rawArgs = mockGenerateContent.mock.calls[0] as unknown as unknown[];
-      const callArgs = rawArgs[0] as Record<string, unknown>;
-      const contents = callArgs["contents"] as Array<{ role: string }>;
-      expect(contents).toHaveLength(2);
-      expect(contents[0]?.role).toBe("user");
-      expect(contents[1]?.role).toBe("model");
+      const callArgs = mockGenerateText.mock.calls[0] as unknown as unknown[];
+      const firstArg = callArgs[0] as Record<string, unknown>;
+      const msgs = firstArg["messages"] as Array<{ role: string; content: string }>;
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0]?.role).toBe("user");
+      expect(msgs[1]?.role).toBe("assistant");
     });
   });
 

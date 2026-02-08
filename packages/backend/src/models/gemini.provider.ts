@@ -1,67 +1,14 @@
-import {
-  GoogleGenerativeAI,
-  type Content,
-  type GenerativeModel,
-  type GenerationConfig,
-} from "@google/generative-ai";
+import { generateText, streamText } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
 import type { ChatMessage, ChatOptions, ChatResponse, ModelProvider, StreamChunk } from "./types";
 
 const DEFAULT_MODEL = "gemini-2.0-flash";
 
-/**
- * Map our generic role names to the Gemini SDK role strings.
- * Gemini only accepts "user" | "model"; system instructions
- * are handled separately via `systemInstruction`.
- */
-function toGeminiRole(role: ChatMessage["role"]): "user" | "model" {
-  switch (role) {
-    case "user":
-      return "user";
-    case "assistant":
-      return "model";
-    case "system":
-      // System messages are filtered out and set via systemInstruction.
-      // This fallback should never be reached.
-      return "user";
-  }
-}
-
-/**
- * Convert our ChatMessage[] to Gemini Content[], stripping system messages.
- */
-function toGeminiContents(messages: ChatMessage[]): Content[] {
-  return messages
-    .filter((m) => m.role !== "system")
-    .map((m) => ({
-      role: toGeminiRole(m.role),
-      parts: [{ text: m.content }],
-    }));
-}
-
-/**
- * Extract system prompt from options or from system-role messages.
- */
-function resolveSystemPrompt(messages: ChatMessage[], options?: ChatOptions): string | undefined {
-  if (options?.systemPrompt) return options.systemPrompt;
-  const systemMsg = messages.find((m) => m.role === "system");
-  return systemMsg?.content;
-}
-
-/**
- * Build Gemini GenerationConfig from our ChatOptions.
- */
-function toGenerationConfig(options?: ChatOptions): GenerationConfig {
-  const config: GenerationConfig = {};
-  if (options?.temperature !== undefined) config.temperature = options.temperature;
-  if (options?.maxTokens !== undefined) config.maxOutputTokens = options.maxTokens;
-  return config;
-}
-
 export class GeminiProvider implements ModelProvider {
   readonly id = "gemini" as const;
 
-  private readonly client: GoogleGenerativeAI;
+  private readonly google: ReturnType<typeof createGoogleGenerativeAI>;
   private readonly defaultModel: string;
 
   constructor(apiKey?: string, defaultModel?: string) {
@@ -72,59 +19,64 @@ export class GeminiProvider implements ModelProvider {
           "Set GOOGLE_GENAI_API_KEY env variable or pass apiKey to constructor.",
       );
     }
-    this.client = new GoogleGenerativeAI(key);
+    this.google = createGoogleGenerativeAI({ apiKey: key });
     this.defaultModel = defaultModel ?? DEFAULT_MODEL;
   }
 
-  /** Get a GenerativeModel instance configured for the request. */
-  private getModel(messages: ChatMessage[], options?: ChatOptions): GenerativeModel {
-    const modelName = options?.model ?? this.defaultModel;
-    const systemPrompt = resolveSystemPrompt(messages, options);
+  /**
+   * Build Vercel AI SDK messages from our ChatMessage[], extracting system prompt.
+   */
+  private buildParams(messages: ChatMessage[], options?: ChatOptions) {
+    const modelId = options?.model ?? this.defaultModel;
 
-    return this.client.getGenerativeModel({
-      model: modelName,
-      generationConfig: toGenerationConfig(options),
-      ...(systemPrompt
-        ? { systemInstruction: { role: "user", parts: [{ text: systemPrompt }] } }
-        : {}),
-    });
+    // Resolve system prompt: explicit option takes priority, then system-role messages.
+    let system: string | undefined = options?.systemPrompt;
+    if (!system) {
+      const systemMsg = messages.find((m) => m.role === "system");
+      system = systemMsg?.content;
+    }
+
+    // Filter out system messages — they are passed via the `system` parameter.
+    const coreMessages = messages
+      .filter((m) => m.role !== "system")
+      .map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
+
+    return {
+      model: this.google(modelId),
+      system,
+      messages: coreMessages,
+      ...(options?.temperature !== undefined ? { temperature: options.temperature } : {}),
+      ...(options?.maxTokens !== undefined ? { maxTokens: options.maxTokens } : {}),
+    };
   }
 
   async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
-    const model = this.getModel(messages, options);
-    const contents = toGeminiContents(messages);
+    const params = this.buildParams(messages, options);
 
-    const result = await model.generateContent({
-      contents,
-    });
-
-    const response = result.response;
-    const text = response.text();
-    const usage = response.usageMetadata;
+    const result = await generateText(params);
 
     return {
-      text,
-      usage: usage
+      text: result.text,
+      usage: result.usage
         ? {
-            promptTokens: usage.promptTokenCount,
-            completionTokens: usage.candidatesTokenCount,
-            totalTokens: usage.totalTokenCount,
+            promptTokens: result.usage.inputTokens ?? 0,
+            completionTokens: result.usage.outputTokens ?? 0,
+            totalTokens: result.usage.totalTokens ?? 0,
           }
         : undefined,
     };
   }
 
   async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<StreamChunk> {
-    const model = this.getModel(messages, options);
-    const contents = toGeminiContents(messages);
+    const params = this.buildParams(messages, options);
 
-    const { stream } = await model.generateContentStream({
-      contents,
-    });
+    const result = streamText(params);
 
-    for await (const chunk of stream) {
-      const text = chunk.text();
-      yield { text, done: false };
+    for await (const textPart of result.textStream) {
+      yield { text: textPart, done: false };
     }
 
     // Final sentinel chunk
