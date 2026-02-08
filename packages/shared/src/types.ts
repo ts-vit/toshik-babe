@@ -1,5 +1,5 @@
 /** Supported message types for WebSocket communication. */
-export type ClientMessageType = "ping" | "echo" | "chat.send" | "chat.history";
+export type ClientMessageType = "ping" | "echo" | "chat.send" | "chat.history" | "chat.list" | "chat.create";
 export type ServerMessageType =
   | "pong"
   | "echo"
@@ -7,7 +7,9 @@ export type ServerMessageType =
   | "chat.delta"
   | "chat.error"
   | "chat.done"
-  | "chat.history";
+  | "chat.history"
+  | "chat.list"
+  | "chat.create";
 
 /** @deprecated Use ClientMessageType | ServerMessageType instead. */
 export type MessageType = ClientMessageType | ServerMessageType;
@@ -84,4 +86,31 @@ export interface ChatHistoryPayload {
   conversationId: string;
   /** Messages ordered by timestamp ASC. */
   messages: ChatHistoryMessage[];
+}
+
+// ── Chat list / create payload types ───────────────────────────────
+
+/** Payload for client → server "chat.create" (create a new conversation). */
+export interface ChatCreatePayload {
+  /** Optional initial title for the conversation. */
+  title?: string;
+}
+
+/** A single conversation entry in the list. */
+export interface ChatListItem {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** Payload for server → client "chat.list" (all conversations). */
+export interface ChatListPayload {
+  conversations: ChatListItem[];
+}
+
+/** Payload for server → client "chat.create" (newly created conversation). */
+export interface ChatCreateResponsePayload {
+  id: string;
+  title: string;
 }

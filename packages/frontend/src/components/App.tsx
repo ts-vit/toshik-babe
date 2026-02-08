@@ -8,11 +8,15 @@ import type {
   ChatErrorPayload,
   ChatHistoryRequestPayload,
   ChatHistoryPayload,
+  ChatListItem,
+  ChatListPayload,
+  ChatCreateResponsePayload,
 } from "@toshik-babe/shared";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { ChatInput } from "./ChatInput";
 import { MessageList } from "./MessageList";
+import { Sidebar } from "./Sidebar";
 import type { ChatMessageData } from "./ChatMessage";
 
 /** Detect if we're running inside Tauri (desktop) or plain browser. */
@@ -31,31 +35,22 @@ function nextRequestId(): string {
   return `req-${requestIdCounter}-${Date.now()}`;
 }
 
-/** Persistent conversation ID stored in localStorage. */
-function getConversationId(): string {
-  const STORAGE_KEY = "toshik-babe-conversation-id";
-  let id = localStorage.getItem(STORAGE_KEY);
-  if (!id) {
-    id = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem(STORAGE_KEY, id);
-  }
-  return id;
-}
-
 export function App(): React.JSX.Element {
   const [backendPort, setBackendPort] = useState<number | null>(IS_TAURI ? null : 3001);
   const [startError, setStartError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
 
+  // Sidebar state
+  const [conversations, setConversations] = useState<ChatListItem[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [sidebarLoading, setSidebarLoading] = useState(false);
+
   // Track the assistant message ID currently being streamed into.
   const streamingMsgIdRef = useRef<string | null>(null);
 
-  // Track whether history has been requested for this connection to avoid duplicates.
-  const historyRequestedRef = useRef(false);
-
-  // Stable conversation ID for the session.
-  const conversationIdRef = useRef(getConversationId());
+  // Track whether initial data has been requested for this connection.
+  const initialRequestedRef = useRef(false);
 
   // In Tauri mode, call the Rust start_backend command on mount.
   useEffect(() => {
@@ -81,39 +76,111 @@ export function App(): React.JSX.Element {
   const wsUrl = backendPort ? `ws://localhost:${backendPort}/ws` : undefined;
   const { state, lastMessage, send, reconnect } = useWebSocket({ url: wsUrl });
 
-  // Request conversation history when WebSocket connects.
+  // Request conversation list when WebSocket connects.
   useEffect(() => {
-    if (state === "open" && !historyRequestedRef.current) {
-      historyRequestedRef.current = true;
+    if (state === "open" && !initialRequestedRef.current) {
+      initialRequestedRef.current = true;
+      setSidebarLoading(true);
+      const listReq: ClientMessage = {
+        type: "chat.list",
+        payload: {},
+        timestamp: new Date().toISOString(),
+      };
+      send(listReq);
+    }
+    if (state === "closed" || state === "error") {
+      initialRequestedRef.current = false;
+    }
+  }, [state, send]);
+
+  /** Request history for a specific conversation. */
+  const requestHistory = useCallback(
+    (conversationId: string) => {
       const historyReq: ClientMessage = {
         type: "chat.history",
         payload: {
-          conversationId: conversationIdRef.current,
+          conversationId,
         } satisfies ChatHistoryRequestPayload,
         timestamp: new Date().toISOString(),
       };
       send(historyReq);
-    }
-    if (state === "closed" || state === "error") {
-      historyRequestedRef.current = false;
-    }
-  }, [state, send]);
+    },
+    [send],
+  );
 
-  // Handle incoming server messages (chat.delta, chat.done, chat.error, chat.history, legacy).
+  /** Switch to a different conversation. */
+  const handleSelectConversation = useCallback(
+    (conversationId: string) => {
+      if (conversationId === activeConversationId) return;
+      // Clear current messages and streaming state.
+      setMessages([]);
+      streamingMsgIdRef.current = null;
+      setIsStreaming(false);
+      setActiveConversationId(conversationId);
+      requestHistory(conversationId);
+    },
+    [activeConversationId, requestHistory],
+  );
+
+  /** Create a new conversation via the backend. */
+  const handleNewChat = useCallback(() => {
+    const createReq: ClientMessage = {
+      type: "chat.create",
+      payload: { title: "New Chat" },
+      timestamp: new Date().toISOString(),
+    };
+    send(createReq);
+  }, [send]);
+
+  // Handle incoming server messages.
   useEffect(() => {
     if (!lastMessage) return;
     const serverMsg = lastMessage as ServerMessage;
 
     switch (serverMsg.type) {
+      case "chat.list": {
+        const listPayload = serverMsg.payload as ChatListPayload;
+        setConversations(listPayload.conversations);
+        setSidebarLoading(false);
+
+        // Auto-select the first conversation if none is active.
+        if (!activeConversationId && listPayload.conversations.length > 0) {
+          const first = listPayload.conversations[0]!;
+          setActiveConversationId(first.id);
+          requestHistory(first.id);
+        }
+        break;
+      }
+
+      case "chat.create": {
+        const createPayload = serverMsg.payload as ChatCreateResponsePayload;
+        const newItem: ChatListItem = {
+          id: createPayload.id,
+          title: createPayload.title,
+          createdAt: serverMsg.timestamp,
+          updatedAt: serverMsg.timestamp,
+        };
+        // Prepend the new conversation to the list and switch to it.
+        setConversations((prev) => [newItem, ...prev]);
+        setMessages([]);
+        streamingMsgIdRef.current = null;
+        setIsStreaming(false);
+        setActiveConversationId(createPayload.id);
+        break;
+      }
+
       case "chat.history": {
         const historyPayload = serverMsg.payload as ChatHistoryPayload;
-        const loaded: ChatMessageData[] = historyPayload.messages.map((m) => ({
-          id: m.id,
-          role: m.role,
-          content: m.content,
-          timestamp: m.timestamp,
-        }));
-        setMessages(loaded);
+        // Only apply if this is for the currently active conversation.
+        if (historyPayload.conversationId === activeConversationId) {
+          const loaded: ChatMessageData[] = historyPayload.messages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            timestamp: m.timestamp,
+          }));
+          setMessages(loaded);
+        }
         break;
       }
 
@@ -122,19 +189,16 @@ export function App(): React.JSX.Element {
         const currentStreamId = streamingMsgIdRef.current;
 
         if (currentStreamId) {
-          // Append delta text to the existing streaming/placeholder message.
           setMessages((prev) =>
             prev.map((m) =>
               m.id === currentStreamId ? { ...m, content: m.content + delta.text } : m,
             ),
           );
         }
-        // If no streamingMsgIdRef (edge case), ignore stale deltas.
         break;
       }
 
       case "chat.done": {
-        // Mark the streaming message as complete.
         const doneId = streamingMsgIdRef.current;
         if (doneId) {
           setMessages((prev) =>
@@ -148,7 +212,6 @@ export function App(): React.JSX.Element {
 
       case "chat.error": {
         const errPayload = serverMsg.payload as ChatErrorPayload;
-        // If we were streaming, mark it done and append error.
         const errStreamId = streamingMsgIdRef.current;
         if (errStreamId) {
           setMessages((prev) =>
@@ -163,7 +226,7 @@ export function App(): React.JSX.Element {
           {
             id: nextId(),
             role: "assistant",
-            content: `⚠️ Error: ${errPayload.error}`,
+            content: `Error: ${errPayload.error}`,
             timestamp: serverMsg.timestamp ?? new Date().toISOString(),
           },
         ]);
@@ -171,7 +234,6 @@ export function App(): React.JSX.Element {
       }
 
       default: {
-        // Legacy: pong, echo, error
         const content = formatServerPayload(serverMsg);
         setMessages((prev) => [
           ...prev,
@@ -188,21 +250,18 @@ export function App(): React.JSX.Element {
 
   const handleSend = useCallback(
     (text: string) => {
-      // Create a placeholder assistant message to show "Thinking…" immediately.
       const assistantId = nextId();
       streamingMsgIdRef.current = assistantId;
       setIsStreaming(true);
 
       setMessages((prev) => [
         ...prev,
-        // User message
         {
           id: nextId(),
           role: "user" as const,
           content: text,
           timestamp: new Date().toISOString(),
         },
-        // Placeholder assistant message (empty content, isStreaming=true shows "Thinking…")
         {
           id: assistantId,
           role: "assistant" as const,
@@ -243,21 +302,33 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full max-w-3xl mx-auto">
-      {/* Header */}
-      <header className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
-        <div>
-          <h1 className="text-lg font-semibold">Toshik Babe Engine</h1>
-          <p className="text-xs text-muted-foreground">Local-first AI assistant</p>
-        </div>
-        <ConnectionStatus state={state} onReconnect={reconnect} />
-      </header>
+    <div className="flex h-screen w-full">
+      {/* Sidebar */}
+      <Sidebar
+        conversations={conversations}
+        activeId={activeConversationId}
+        onSelect={handleSelectConversation}
+        onNewChat={handleNewChat}
+        loading={sidebarLoading}
+      />
 
-      {/* Messages */}
-      <MessageList messages={messages} />
+      {/* Main chat area */}
+      <div className="flex flex-col flex-1 min-w-0">
+        {/* Header */}
+        <header className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
+          <div>
+            <h1 className="text-lg font-semibold">Toshik Babe Engine</h1>
+            <p className="text-xs text-muted-foreground">Local-first AI assistant</p>
+          </div>
+          <ConnectionStatus state={state} onReconnect={reconnect} />
+        </header>
 
-      {/* Input — disabled while streaming or disconnected */}
-      <ChatInput onSend={handleSend} disabled={state !== "open" || isStreaming} />
+        {/* Messages */}
+        <MessageList messages={messages} />
+
+        {/* Input — disabled while streaming or disconnected */}
+        <ChatInput onSend={handleSend} disabled={state !== "open" || isStreaming} />
+      </div>
     </div>
   );
 }

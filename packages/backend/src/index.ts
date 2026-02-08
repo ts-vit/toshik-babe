@@ -9,6 +9,9 @@ import type {
   ChatHistoryRequestPayload,
   ChatHistoryPayload,
   ChatHistoryMessage,
+  ChatCreatePayload,
+  ChatListPayload,
+  ChatCreateResponsePayload,
 } from "@toshik-babe/shared";
 import { GigaChatProvider } from "./models/gigachat.provider";
 import type { ChatMessage as ProviderChatMessage } from "./models/types";
@@ -219,6 +222,47 @@ function handleChatHistory(
   );
 }
 
+/**
+ * Handle "chat.list": return all conversations ordered by updated_at DESC.
+ */
+function handleChatList(ws: ServerWebSocket<unknown>): void {
+  const rows = conversationsDao.list(100);
+  const conversations = rows.map((r) => ({
+    id: r.id,
+    title: r.title,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  }));
+
+  ws.send(
+    makeServerMessage("chat.list", {
+      conversations,
+    } satisfies ChatListPayload),
+  );
+}
+
+/**
+ * Handle "chat.create": create a new conversation and return its ID + title.
+ * Also binds the WebSocket to the new conversation.
+ */
+function handleChatCreate(
+  ws: ServerWebSocket<unknown>,
+  payload: ChatCreatePayload | undefined,
+): void {
+  const title = payload?.title?.trim() || "New Chat";
+  const conv = conversationsDao.create({ title });
+
+  // Bind ws to the new conversation so subsequent chat.send uses it.
+  wsConversationId.set(ws, conv.id);
+
+  ws.send(
+    makeServerMessage("chat.create", {
+      id: conv.id,
+      title: conv.title,
+    } satisfies ChatCreateResponsePayload),
+  );
+}
+
 function handleMessage(ws: ServerWebSocket<unknown>, raw: string | Buffer) {
   const text = typeof raw === "string" ? raw : new TextDecoder().decode(raw);
 
@@ -252,6 +296,12 @@ function handleMessage(ws: ServerWebSocket<unknown>, raw: string | Buffer) {
       break;
     case "chat.history":
       handleChatHistory(ws, parsed.payload as ChatHistoryRequestPayload);
+      break;
+    case "chat.list":
+      handleChatList(ws);
+      break;
+    case "chat.create":
+      handleChatCreate(ws, parsed.payload as ChatCreatePayload | undefined);
       break;
     default:
       ws.send(
