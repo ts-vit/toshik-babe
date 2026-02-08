@@ -13,10 +13,12 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.38",
     "@ai-sdk/google": "^3.0.22",
     "@ai-sdk/openai": "^3.0.26",
     "@toshik-babe/shared": "workspace:*",
-    "ai": "^6.0.77"
+    "ai": "^6.0.77",
+    "ollama-ai-provider": "^1.2.0"
   },
   "devDependencies": {
     "@types/bun": "latest",
