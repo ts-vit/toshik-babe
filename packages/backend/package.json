@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@toshik-babe/shared": "workspace:*"
   },
   "devDependencies": {

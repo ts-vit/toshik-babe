@@ -60,9 +60,9 @@
 
 ### Sprint 0.2: Первый вертикальный слайс (Неделя 2)
 
-**Задача 4:** ModelProvider + OpenAI
+**Задача 4:** ModelProvider + Google AI (Gemini)
 - Интерфейс ModelProvider
-- OpenAIProvider с stream()
+- GeminiProvider с stream()
 - Конфигурация API key
 - Unit-тесты
 
