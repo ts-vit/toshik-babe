@@ -1,10 +1,43 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import type { ClientMessage } from "@toshik-babe/shared";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { ConnectionStatus } from "./ConnectionStatus";
 
+/** Detect if we're running inside Tauri (desktop) or plain browser. */
+const IS_TAURI = typeof (window as Record<string, unknown>).__TAURI_INTERNALS__ !== "undefined";
+
 export function App(): React.JSX.Element {
-  const { state, lastMessage, send, reconnect } = useWebSocket();
+  const [backendPort, setBackendPort] = useState<number | null>(
+    IS_TAURI ? null : 3001,
+  );
+  const [startError, setStartError] = useState<string | null>(null);
+
+  // In Tauri mode, call the Rust start_backend command on mount.
+  useEffect(() => {
+    if (!IS_TAURI) return;
+    let cancelled = false;
+
+    invoke<number>("start_backend")
+      .then((port) => {
+        if (!cancelled) setBackendPort(port);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          const msg = typeof err === "string" ? err : String(err);
+          // If backend is already running, the error contains the message.
+          // We could try to recover, but for now surface it.
+          setStartError(msg);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const wsUrl = backendPort ? `ws://localhost:${backendPort}/ws` : undefined;
+  const { state, lastMessage, send, reconnect } = useWebSocket({ url: wsUrl });
   const [input, setInput] = useState("");
 
   const handleSend = (e: React.FormEvent) => {
@@ -29,6 +62,29 @@ export function App(): React.JSX.Element {
     };
     send(msg);
   };
+
+  // While waiting for the backend to start in Tauri mode, show a loading state.
+  if (IS_TAURI && !backendPort && !startError) {
+    return (
+      <div style={{ textAlign: "center", padding: "2rem" }}>
+        <h1>Toshik Babe Engine</h1>
+        <p style={{ color: "var(--text-secondary)", marginTop: "1rem" }}>
+          Starting backend...
+        </p>
+      </div>
+    );
+  }
+
+  if (startError) {
+    return (
+      <div style={{ textAlign: "center", padding: "2rem" }}>
+        <h1>Toshik Babe Engine</h1>
+        <p style={{ color: "#ef4444", marginTop: "1rem" }}>
+          Failed to start backend: {startError}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div

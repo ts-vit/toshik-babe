@@ -1,7 +1,24 @@
 import type { ServerWebSocket } from "bun";
 import type { ClientMessage, ServerMessage } from "@toshik-babe/shared";
 
-const PORT = Number(process.env["PORT"]) || 3001;
+/** Resolve port: CLI --port flag > PORT env var > default 3001 */
+function resolvePort(): number {
+  const args = process.argv;
+  const portFlagIdx = args.indexOf("--port");
+  if (portFlagIdx !== -1 && portFlagIdx + 1 < args.length) {
+    const parsed = Number(args[portFlagIdx + 1]);
+    if (Number.isFinite(parsed) && parsed > 0 && parsed < 65536) {
+      return parsed;
+    }
+  }
+  const envPort = Number(process.env["PORT"]);
+  if (Number.isFinite(envPort) && envPort > 0 && envPort < 65536) {
+    return envPort;
+  }
+  return 3001;
+}
+
+const PORT = resolvePort();
 
 function makeServerMessage(
   type: ServerMessage["type"],

@@ -4,7 +4,7 @@ import type { ClientMessage, ServerMessage } from "@toshik-babe/shared";
 export type ConnectionState = "connecting" | "open" | "closed" | "error";
 
 interface UseWebSocketOptions {
-  /** WebSocket endpoint URL. Defaults to ws://localhost:3001/ws */
+  /** WebSocket endpoint URL (e.g. ws://localhost:3001/ws). When undefined, hook stays idle. */
   url?: string;
   /** Auto-reconnect on close (default: true). */
   autoReconnect?: boolean;
@@ -27,13 +27,13 @@ interface UseWebSocketReturn {
 
 export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
   const {
-    url = "ws://localhost:3001/ws",
+    url,
     autoReconnect = true,
     reconnectDelay = 2000,
     maxRetries = 10,
   } = options;
 
-  const [state, setState] = useState<ConnectionState>("connecting");
+  const [state, setState] = useState<ConnectionState>(url ? "connecting" : "closed");
   const [lastMessage, setLastMessage] = useState<ServerMessage | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -57,6 +57,7 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   }, []);
 
   const connect = useCallback(() => {
+    if (!url) return;
     cleanup();
     if (unmountedRef.current) return;
 
@@ -98,13 +99,18 @@ export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketRet
   }, [url, autoReconnect, reconnectDelay, maxRetries, cleanup]);
 
   useEffect(() => {
+    if (!url) {
+      cleanup();
+      setState("closed");
+      return;
+    }
     unmountedRef.current = false;
     connect();
     return () => {
       unmountedRef.current = true;
       cleanup();
     };
-  }, [connect, cleanup]);
+  }, [url, connect, cleanup]);
 
   const send = useCallback((msg: ClientMessage) => {
     if (wsRef.current?.readyState === WebSocket.OPEN) {
