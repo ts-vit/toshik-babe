@@ -7,7 +7,7 @@ import type {
   ChatDonePayload,
   ChatErrorPayload,
 } from "@toshik-babe/shared";
-import { GeminiProvider } from "./models/gemini.provider";
+import { GigaChatProvider } from "./models/gigachat.provider";
 import type { ChatMessage as ProviderChatMessage } from "./models/types";
 
 /** Resolve port: CLI --port flag > PORT env var > default 3001 */
@@ -29,14 +29,14 @@ function resolvePort(): number {
 
 const PORT = resolvePort();
 
-// ── Gemini provider (lazy init: crashes early if key missing) ───────
-let geminiProvider: GeminiProvider | null = null;
+// ── GigaChat provider (lazy init: crashes early if key missing) ─────
+let gigachatProvider: GigaChatProvider | null = null;
 
-function getGeminiProvider(): GeminiProvider {
-  if (!geminiProvider) {
-    geminiProvider = new GeminiProvider(process.env["GOOGLE_GENAI_API_KEY"]);
+function getGigaChatProvider(): GigaChatProvider {
+  if (!gigachatProvider) {
+    gigachatProvider = new GigaChatProvider(process.env["GIGACHAT_API_KEY"]);
   }
-  return geminiProvider;
+  return gigachatProvider;
 }
 
 // ── Per-connection conversation history ────────────────────────────
@@ -62,7 +62,7 @@ function makeServerMessage(type: ServerMessage["type"], payload: unknown): strin
 }
 
 /**
- * Handle "chat.send": stream Gemini response back as chat.delta / chat.done / chat.error.
+ * Handle "chat.send": stream GigaChat response back as chat.delta / chat.done / chat.error.
  */
 async function handleChatSend(
   ws: ServerWebSocket<unknown>,
@@ -80,9 +80,9 @@ async function handleChatSend(
     return;
   }
 
-  let provider: GeminiProvider;
+  let provider: GigaChatProvider;
   try {
-    provider = getGeminiProvider();
+    provider = getGigaChatProvider();
   } catch (err) {
     ws.send(
       makeServerMessage("chat.error", {

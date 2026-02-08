@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.22",
+    "@ai-sdk/openai": "^3.0.26",
     "@toshik-babe/shared": "workspace:*",
     "ai": "^6.0.77"
   },
