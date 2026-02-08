@@ -1,5 +1,7 @@
 import React from "react";
 import type { ConnectionState } from "../hooks/useWebSocket";
+import { cn } from "../lib/utils";
+import { Button } from "./ui/button";
 
 interface ConnectionStatusProps {
   state: ConnectionState;
@@ -8,61 +10,55 @@ interface ConnectionStatusProps {
 
 const STATE_CONFIG: Record<
   ConnectionState,
-  { color: string; label: string }
+  { colorClass: string; glowClass: string; label: string }
 > = {
-  connecting: { color: "#f59e0b", label: "Connecting..." },
-  open: { color: "#22c55e", label: "Connected" },
-  closed: { color: "#ef4444", label: "Disconnected" },
-  error: { color: "#ef4444", label: "Error" },
+  connecting: {
+    colorClass: "bg-yellow-500",
+    glowClass: "shadow-[0_0_6px_theme(colors.yellow.500)]",
+    label: "Connecting…",
+  },
+  open: {
+    colorClass: "bg-green-500",
+    glowClass: "shadow-[0_0_6px_theme(colors.green.500)]",
+    label: "Connected",
+  },
+  closed: {
+    colorClass: "bg-red-500",
+    glowClass: "shadow-[0_0_6px_theme(colors.red.500)]",
+    label: "Disconnected",
+  },
+  error: {
+    colorClass: "bg-red-500",
+    glowClass: "shadow-[0_0_6px_theme(colors.red.500)]",
+    label: "Error",
+  },
 };
 
 export function ConnectionStatus({
   state,
   onReconnect,
 }: ConnectionStatusProps): React.JSX.Element {
-  const { color, label } = STATE_CONFIG[state];
+  const { colorClass, glowClass, label } = STATE_CONFIG[state];
 
   return (
-    <div
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.5rem",
-        padding: "0.35rem 0.75rem",
-        borderRadius: "9999px",
-        backgroundColor: "var(--bg-secondary)",
-        border: "1px solid var(--border)",
-        fontSize: "0.85rem",
-      }}
-    >
+    <div className="inline-flex items-center gap-2 rounded-full bg-secondary border border-border px-3 py-1.5 text-sm">
       <span
-        style={{
-          width: 8,
-          height: 8,
-          borderRadius: "50%",
-          backgroundColor: color,
-          display: "inline-block",
-          boxShadow: `0 0 6px ${color}`,
-        }}
+        className={cn(
+          "inline-block h-2 w-2 rounded-full",
+          colorClass,
+          glowClass,
+        )}
       />
-      <span style={{ color: "var(--text-secondary)" }}>{label}</span>
+      <span className="text-muted-foreground">{label}</span>
       {(state === "closed" || state === "error") && onReconnect && (
-        <button
-          type="button"
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={onReconnect}
-          style={{
-            marginLeft: "0.25rem",
-            padding: "0.15rem 0.5rem",
-            fontSize: "0.75rem",
-            border: "1px solid var(--border)",
-            borderRadius: "4px",
-            backgroundColor: "transparent",
-            color: "var(--text-primary)",
-            cursor: "pointer",
-          }}
+          className="ml-1 h-6 px-2 text-xs"
         >
           Reconnect
-        </button>
+        </Button>
       )}
     </div>
   );

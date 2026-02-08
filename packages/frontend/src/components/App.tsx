@@ -1,17 +1,28 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ClientMessage } from "@toshik-babe/shared";
+import type { ClientMessage, ServerMessage } from "@toshik-babe/shared";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { ConnectionStatus } from "./ConnectionStatus";
+import { ChatInput } from "./ChatInput";
+import { MessageList } from "./MessageList";
+import type { ChatMessageData } from "./ChatMessage";
 
 /** Detect if we're running inside Tauri (desktop) or plain browser. */
-const IS_TAURI = typeof (window as Record<string, unknown>).__TAURI_INTERNALS__ !== "undefined";
+const IS_TAURI =
+  typeof (window as unknown as Record<string, unknown>).__TAURI_INTERNALS__ !== "undefined";
+
+let messageIdCounter = 0;
+function nextId(): string {
+  messageIdCounter += 1;
+  return `msg-${messageIdCounter}-${Date.now()}`;
+}
 
 export function App(): React.JSX.Element {
   const [backendPort, setBackendPort] = useState<number | null>(
     IS_TAURI ? null : 3001,
   );
   const [startError, setStartError] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessageData[]>([]);
 
   // In Tauri mode, call the Rust start_backend command on mount.
   useEffect(() => {
@@ -25,8 +36,6 @@ export function App(): React.JSX.Element {
       .catch((err) => {
         if (!cancelled) {
           const msg = typeof err === "string" ? err : String(err);
-          // If backend is already running, the error contains the message.
-          // We could try to recover, but for now surface it.
           setStartError(msg);
         }
       });
@@ -38,48 +47,61 @@ export function App(): React.JSX.Element {
 
   const wsUrl = backendPort ? `ws://localhost:${backendPort}/ws` : undefined;
   const { state, lastMessage, send, reconnect } = useWebSocket({ url: wsUrl });
-  const [input, setInput] = useState("");
 
-  const handleSend = (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text) return;
+  // Append server responses to the message list.
+  useEffect(() => {
+    if (!lastMessage) return;
+    const serverMsg = lastMessage as ServerMessage;
+    const content = formatServerPayload(serverMsg);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: nextId(),
+        role: "assistant",
+        content,
+        timestamp: serverMsg.timestamp ?? new Date().toISOString(),
+      },
+    ]);
+  }, [lastMessage]);
 
-    const msg: ClientMessage = {
-      type: "echo",
-      payload: { text },
-      timestamp: new Date().toISOString(),
-    };
-    send(msg);
-    setInput("");
-  };
+  const handleSend = useCallback(
+    (text: string) => {
+      // Add user message to chat.
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: nextId(),
+          role: "user",
+          content: text,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
 
-  const handlePing = () => {
-    const msg: ClientMessage = {
-      type: "ping",
-      payload: null,
-      timestamp: new Date().toISOString(),
-    };
-    send(msg);
-  };
+      const msg: ClientMessage = {
+        type: "echo",
+        payload: { text },
+        timestamp: new Date().toISOString(),
+      };
+      send(msg);
+    },
+    [send],
+  );
 
-  // While waiting for the backend to start in Tauri mode, show a loading state.
+  // Loading state while waiting for backend in Tauri mode.
   if (IS_TAURI && !backendPort && !startError) {
     return (
-      <div style={{ textAlign: "center", padding: "2rem" }}>
-        <h1>Toshik Babe Engine</h1>
-        <p style={{ color: "var(--text-secondary)", marginTop: "1rem" }}>
-          Starting backend...
-        </p>
+      <div className="flex flex-col items-center justify-center h-screen w-full">
+        <h1 className="text-2xl font-bold">Toshik Babe Engine</h1>
+        <p className="text-muted-foreground mt-2">Starting backend…</p>
       </div>
     );
   }
 
   if (startError) {
     return (
-      <div style={{ textAlign: "center", padding: "2rem" }}>
-        <h1>Toshik Babe Engine</h1>
-        <p style={{ color: "#ef4444", marginTop: "1rem" }}>
+      <div className="flex flex-col items-center justify-center h-screen w-full">
+        <h1 className="text-2xl font-bold">Toshik Babe Engine</h1>
+        <p className="text-destructive mt-2">
           Failed to start backend: {startError}
         </p>
       </div>
@@ -87,102 +109,36 @@ export function App(): React.JSX.Element {
   }
 
   return (
-    <div
-      style={{
-        textAlign: "center",
-        padding: "2rem",
-        maxWidth: 480,
-        width: "100%",
-      }}
-    >
-      <h1>Toshik Babe Engine</h1>
-      <p style={{ color: "var(--text-secondary)", margin: "0.5rem 0 1.5rem" }}>
-        Local-first AI assistant
-      </p>
-
-      <ConnectionStatus state={state} onReconnect={reconnect} />
-
-      <form
-        onSubmit={handleSend}
-        style={{
-          display: "flex",
-          gap: "0.5rem",
-          marginTop: "1.5rem",
-        }}
-      >
-        <input
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Type a message..."
-          disabled={state !== "open"}
-          style={{
-            flex: 1,
-            padding: "0.5rem 0.75rem",
-            borderRadius: "6px",
-            border: "1px solid var(--border)",
-            backgroundColor: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-            fontSize: "0.9rem",
-            outline: "none",
-          }}
-        />
-        <button
-          type="submit"
-          disabled={state !== "open" || !input.trim()}
-          style={{
-            padding: "0.5rem 1rem",
-            borderRadius: "6px",
-            border: "none",
-            backgroundColor: "var(--accent)",
-            color: "#fff",
-            fontSize: "0.9rem",
-            cursor: state === "open" && input.trim() ? "pointer" : "not-allowed",
-            opacity: state === "open" && input.trim() ? 1 : 0.5,
-          }}
-        >
-          Send
-        </button>
-        <button
-          type="button"
-          onClick={handlePing}
-          disabled={state !== "open"}
-          style={{
-            padding: "0.5rem 0.75rem",
-            borderRadius: "6px",
-            border: "1px solid var(--border)",
-            backgroundColor: "transparent",
-            color: "var(--text-primary)",
-            fontSize: "0.9rem",
-            cursor: state === "open" ? "pointer" : "not-allowed",
-            opacity: state === "open" ? 1 : 0.5,
-          }}
-        >
-          Ping
-        </button>
-      </form>
-
-      {lastMessage && (
-        <div
-          style={{
-            marginTop: "1.5rem",
-            padding: "0.75rem 1rem",
-            borderRadius: "6px",
-            border: "1px solid var(--border)",
-            backgroundColor: "var(--bg-secondary)",
-            textAlign: "left",
-            fontSize: "0.85rem",
-            wordBreak: "break-all",
-          }}
-        >
-          <div style={{ color: "var(--text-secondary)", marginBottom: "0.25rem" }}>
-            Last response ({lastMessage.type}):
-          </div>
-          <code style={{ color: "var(--text-primary)" }}>
-            {JSON.stringify(lastMessage.payload)}
-          </code>
+    <div className="flex flex-col h-screen w-full max-w-3xl mx-auto">
+      {/* Header */}
+      <header className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
+        <div>
+          <h1 className="text-lg font-semibold">Toshik Babe Engine</h1>
+          <p className="text-xs text-muted-foreground">Local-first AI assistant</p>
         </div>
-      )}
+        <ConnectionStatus state={state} onReconnect={reconnect} />
+      </header>
+
+      {/* Messages */}
+      <MessageList messages={messages} />
+
+      {/* Input */}
+      <ChatInput onSend={handleSend} disabled={state !== "open"} />
     </div>
   );
+}
+
+/** Format server message payload into readable text for the chat bubble. */
+function formatServerPayload(msg: ServerMessage): string {
+  if (msg.type === "pong") return "🏓 Pong!";
+  if (msg.type === "error") {
+    const payload = msg.payload as Record<string, unknown> | null;
+    return `⚠️ Error: ${payload?.["message"] ?? JSON.stringify(payload)}`;
+  }
+  // echo or unknown
+  const payload = msg.payload as Record<string, unknown> | null;
+  if (payload && typeof payload === "object" && "text" in payload) {
+    return String(payload["text"]);
+  }
+  return JSON.stringify(msg.payload, null, 2);
 }
