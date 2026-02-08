@@ -9,6 +9,8 @@ export interface ChatMessageData {
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
+  /** True while the assistant message is still being streamed. */
+  isStreaming?: boolean;
 }
 
 interface ChatMessageProps {
@@ -61,9 +63,19 @@ export function ChatMessage({ message }: ChatMessageProps): React.JSX.Element {
           <p className="whitespace-pre-wrap">{message.content}</p>
         ) : (
           <div className="prose prose-invert prose-sm max-w-none prose-pre:bg-background/50 prose-pre:border prose-pre:border-border prose-code:text-foreground">
-            <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
-              {message.content}
-            </ReactMarkdown>
+            {message.content ? (
+              <ReactMarkdown rehypePlugins={[rehypeHighlight]}>
+                {message.content}
+              </ReactMarkdown>
+            ) : message.isStreaming ? (
+              <span className="inline-flex items-center gap-1 text-muted-foreground">
+                <span className="animate-pulse">Thinking</span>
+                <StreamingDots />
+              </span>
+            ) : null}
+            {message.isStreaming && message.content && (
+              <span className="inline-block w-2 h-4 bg-foreground/70 animate-pulse ml-0.5 align-text-bottom rounded-sm" />
+            )}
           </div>
         )}
         <div
@@ -76,6 +88,17 @@ export function ChatMessage({ message }: ChatMessageProps): React.JSX.Element {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Animated dots shown while waiting for the first token. */
+function StreamingDots(): React.JSX.Element {
+  return (
+    <span className="inline-flex gap-0.5">
+      <span className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: "0ms" }} />
+      <span className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: "150ms" }} />
+      <span className="w-1 h-1 bg-current rounded-full animate-bounce" style={{ animationDelay: "300ms" }} />
+    </span>
   );
 }
 

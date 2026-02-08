@@ -1,6 +1,12 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
-import type { ClientMessage, ServerMessage } from "@toshik-babe/shared";
+import type {
+  ClientMessage,
+  ServerMessage,
+  ChatSendPayload,
+  ChatDeltaPayload,
+  ChatErrorPayload,
+} from "@toshik-babe/shared";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { ConnectionStatus } from "./ConnectionStatus";
 import { ChatInput } from "./ChatInput";
@@ -17,12 +23,22 @@ function nextId(): string {
   return `msg-${messageIdCounter}-${Date.now()}`;
 }
 
+let requestIdCounter = 0;
+function nextRequestId(): string {
+  requestIdCounter += 1;
+  return `req-${requestIdCounter}-${Date.now()}`;
+}
+
 export function App(): React.JSX.Element {
   const [backendPort, setBackendPort] = useState<number | null>(
     IS_TAURI ? null : 3001,
   );
   const [startError, setStartError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
+  const [isStreaming, setIsStreaming] = useState(false);
+
+  // Track the assistant message ID currently being streamed into.
+  const streamingMsgIdRef = useRef<string | null>(null);
 
   // In Tauri mode, call the Rust start_backend command on mount.
   useEffect(() => {
@@ -48,38 +64,117 @@ export function App(): React.JSX.Element {
   const wsUrl = backendPort ? `ws://localhost:${backendPort}/ws` : undefined;
   const { state, lastMessage, send, reconnect } = useWebSocket({ url: wsUrl });
 
-  // Append server responses to the message list.
+  // Handle incoming server messages (chat.delta, chat.done, chat.error, legacy).
   useEffect(() => {
     if (!lastMessage) return;
     const serverMsg = lastMessage as ServerMessage;
-    const content = formatServerPayload(serverMsg);
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: nextId(),
-        role: "assistant",
-        content,
-        timestamp: serverMsg.timestamp ?? new Date().toISOString(),
-      },
-    ]);
+
+    switch (serverMsg.type) {
+      case "chat.delta": {
+        const delta = serverMsg.payload as ChatDeltaPayload;
+        const currentStreamId = streamingMsgIdRef.current;
+
+        if (currentStreamId) {
+          // Append delta text to the existing streaming/placeholder message.
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === currentStreamId
+                ? { ...m, content: m.content + delta.text }
+                : m,
+            ),
+          );
+        }
+        // If no streamingMsgIdRef (edge case), ignore stale deltas.
+        break;
+      }
+
+      case "chat.done": {
+        // Mark the streaming message as complete.
+        const doneId = streamingMsgIdRef.current;
+        if (doneId) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === doneId ? { ...m, isStreaming: false } : m,
+            ),
+          );
+        }
+        streamingMsgIdRef.current = null;
+        setIsStreaming(false);
+        break;
+      }
+
+      case "chat.error": {
+        const errPayload = serverMsg.payload as ChatErrorPayload;
+        // If we were streaming, mark it done and append error.
+        const errStreamId = streamingMsgIdRef.current;
+        if (errStreamId) {
+          setMessages((prev) =>
+            prev.map((m) =>
+              m.id === errStreamId ? { ...m, isStreaming: false } : m,
+            ),
+          );
+        }
+        streamingMsgIdRef.current = null;
+        setIsStreaming(false);
+
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId(),
+            role: "assistant",
+            content: `⚠️ Error: ${errPayload.error}`,
+            timestamp: serverMsg.timestamp ?? new Date().toISOString(),
+          },
+        ]);
+        break;
+      }
+
+      default: {
+        // Legacy: pong, echo, error
+        const content = formatServerPayload(serverMsg);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: nextId(),
+            role: "assistant",
+            content,
+            timestamp: serverMsg.timestamp ?? new Date().toISOString(),
+          },
+        ]);
+      }
+    }
   }, [lastMessage]);
 
   const handleSend = useCallback(
     (text: string) => {
-      // Add user message to chat.
+      // Create a placeholder assistant message to show "Thinking…" immediately.
+      const assistantId = nextId();
+      streamingMsgIdRef.current = assistantId;
+      setIsStreaming(true);
+
       setMessages((prev) => [
         ...prev,
+        // User message
         {
           id: nextId(),
-          role: "user",
+          role: "user" as const,
           content: text,
           timestamp: new Date().toISOString(),
         },
+        // Placeholder assistant message (empty content, isStreaming=true shows "Thinking…")
+        {
+          id: assistantId,
+          role: "assistant" as const,
+          content: "",
+          timestamp: new Date().toISOString(),
+          isStreaming: true,
+        },
       ]);
 
+      const requestId = nextRequestId();
       const msg: ClientMessage = {
-        type: "echo",
-        payload: { text },
+        type: "chat.send",
+        payload: { text, requestId } satisfies ChatSendPayload,
         timestamp: new Date().toISOString(),
       };
       send(msg);
@@ -122,13 +217,16 @@ export function App(): React.JSX.Element {
       {/* Messages */}
       <MessageList messages={messages} />
 
-      {/* Input */}
-      <ChatInput onSend={handleSend} disabled={state !== "open"} />
+      {/* Input — disabled while streaming or disconnected */}
+      <ChatInput
+        onSend={handleSend}
+        disabled={state !== "open" || isStreaming}
+      />
     </div>
   );
 }
 
-/** Format server message payload into readable text for the chat bubble. */
+/** Format server message payload into readable text for the chat bubble (legacy types). */
 function formatServerPayload(msg: ServerMessage): string {
   if (msg.type === "pong") return "🏓 Pong!";
   if (msg.type === "error") {
