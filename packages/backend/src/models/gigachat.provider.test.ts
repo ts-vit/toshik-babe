@@ -27,7 +27,10 @@ const mockStreamText = mock(() => ({
 
 const mockOpenAIModel = mock((_modelId: string) => `mock-model:${_modelId}`);
 
-const mockCreateOpenAI = mock((_opts: { apiKey: string; baseURL: string }) => mockOpenAIModel);
+const mockCreateOpenAI = mock(
+  (_opts: { apiKey: string; baseURL: string; fetch?: (url: RequestInfo, init?: RequestInit) => Promise<Response> }) =>
+    ({ chat: mockOpenAIModel }),
+);
 
 mock.module("ai", () => ({
   generateText: mockGenerateText,
@@ -83,12 +86,15 @@ describe("GigaChatProvider", () => {
     }
   });
 
-  test("createOpenAI is called with correct baseURL", () => {
+  test("createOpenAI is called with baseURL and custom fetch", () => {
     new GigaChatProvider("test-key");
-    expect(mockCreateOpenAI).toHaveBeenCalledWith({
-      apiKey: "test-key",
+    expect(mockCreateOpenAI).toHaveBeenCalledTimes(1);
+    const opts = mockCreateOpenAI.mock.calls[0]![0];
+    expect(opts).toMatchObject({
+      apiKey: "oauth-managed",
       baseURL: "https://gigachat.devices.sberbank.ru/api/v1",
     });
+    expect(typeof opts.fetch).toBe("function");
   });
 
   describe("chat()", () => {

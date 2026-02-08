@@ -140,8 +140,24 @@ fn start_backend(app: AppHandle, state: State<'_, BackendProcess>) -> Result<u16
         log_path.display()
     );
 
-    let child = Command::new("bun")
-        .arg("run")
+    // Resolve .env path from workspace root (backend_script = <workspace>/packages/backend/src/index.ts)
+    let env_file = backend_script
+        .parent()
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .and_then(|p| p.parent())
+        .map(|root| root.join(".env"));
+
+    let mut cmd = Command::new("bun");
+    cmd.arg("run");
+
+    if let Some(ref env_path) = env_file {
+        if env_path.exists() {
+            cmd.arg(format!("--env-file={}", env_path.display()));
+        }
+    }
+
+    let child = cmd
         .arg(&backend_script)
         .arg("--port")
         .arg(port.to_string())

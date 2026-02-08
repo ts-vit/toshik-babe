@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "bunx tauri dev",
     "build": "bunx tauri build",
-    "dev:web": "bun --watch serve.ts",
+    "dev:web": "bun --hot serve.ts",
     "build:web": "bun run typecheck",
     "lint": "eslint src/",
     "format": "prettier --write src/",
