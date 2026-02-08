@@ -1,12 +1,13 @@
 /** Supported message types for WebSocket communication. */
-export type ClientMessageType = "ping" | "echo" | "chat.send";
+export type ClientMessageType = "ping" | "echo" | "chat.send" | "chat.history";
 export type ServerMessageType =
   | "pong"
   | "echo"
   | "error"
   | "chat.delta"
   | "chat.error"
-  | "chat.done";
+  | "chat.done"
+  | "chat.history";
 
 /** @deprecated Use ClientMessageType | ServerMessageType instead. */
 export type MessageType = ClientMessageType | ServerMessageType;
@@ -61,4 +62,26 @@ export interface ChatErrorPayload {
   error: string;
   /** Request ID echoed from chat.send. */
   requestId?: string;
+}
+
+/** Payload for client → server "chat.history" (request conversation history). */
+export interface ChatHistoryRequestPayload {
+  /** Conversation ID to fetch history for. */
+  conversationId: string;
+}
+
+/** A single message entry in the history payload. */
+export interface ChatHistoryMessage {
+  id: string;
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: string;
+}
+
+/** Payload for server → client "chat.history" (conversation history). */
+export interface ChatHistoryPayload {
+  /** Conversation ID these messages belong to. */
+  conversationId: string;
+  /** Messages ordered by timestamp ASC. */
+  messages: ChatHistoryMessage[];
 }

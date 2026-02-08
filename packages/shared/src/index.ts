@@ -9,4 +9,7 @@ export type {
   ChatDeltaPayload,
   ChatDonePayload,
   ChatErrorPayload,
+  ChatHistoryRequestPayload,
+  ChatHistoryMessage,
+  ChatHistoryPayload,
 } from "./types";

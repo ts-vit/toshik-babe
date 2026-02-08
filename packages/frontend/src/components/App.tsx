@@ -6,6 +6,8 @@ import type {
   ChatSendPayload,
   ChatDeltaPayload,
   ChatErrorPayload,
+  ChatHistoryRequestPayload,
+  ChatHistoryPayload,
 } from "@toshik-babe/shared";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { ConnectionStatus } from "./ConnectionStatus";
@@ -29,6 +31,17 @@ function nextRequestId(): string {
   return `req-${requestIdCounter}-${Date.now()}`;
 }
 
+/** Persistent conversation ID stored in localStorage. */
+function getConversationId(): string {
+  const STORAGE_KEY = "toshik-babe-conversation-id";
+  let id = localStorage.getItem(STORAGE_KEY);
+  if (!id) {
+    id = `conv-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    localStorage.setItem(STORAGE_KEY, id);
+  }
+  return id;
+}
+
 export function App(): React.JSX.Element {
   const [backendPort, setBackendPort] = useState<number | null>(IS_TAURI ? null : 3001);
   const [startError, setStartError] = useState<string | null>(null);
@@ -37,6 +50,12 @@ export function App(): React.JSX.Element {
 
   // Track the assistant message ID currently being streamed into.
   const streamingMsgIdRef = useRef<string | null>(null);
+
+  // Track whether history has been requested for this connection to avoid duplicates.
+  const historyRequestedRef = useRef(false);
+
+  // Stable conversation ID for the session.
+  const conversationIdRef = useRef(getConversationId());
 
   // In Tauri mode, call the Rust start_backend command on mount.
   useEffect(() => {
@@ -62,12 +81,42 @@ export function App(): React.JSX.Element {
   const wsUrl = backendPort ? `ws://localhost:${backendPort}/ws` : undefined;
   const { state, lastMessage, send, reconnect } = useWebSocket({ url: wsUrl });
 
-  // Handle incoming server messages (chat.delta, chat.done, chat.error, legacy).
+  // Request conversation history when WebSocket connects.
+  useEffect(() => {
+    if (state === "open" && !historyRequestedRef.current) {
+      historyRequestedRef.current = true;
+      const historyReq: ClientMessage = {
+        type: "chat.history",
+        payload: {
+          conversationId: conversationIdRef.current,
+        } satisfies ChatHistoryRequestPayload,
+        timestamp: new Date().toISOString(),
+      };
+      send(historyReq);
+    }
+    if (state === "closed" || state === "error") {
+      historyRequestedRef.current = false;
+    }
+  }, [state, send]);
+
+  // Handle incoming server messages (chat.delta, chat.done, chat.error, chat.history, legacy).
   useEffect(() => {
     if (!lastMessage) return;
     const serverMsg = lastMessage as ServerMessage;
 
     switch (serverMsg.type) {
+      case "chat.history": {
+        const historyPayload = serverMsg.payload as ChatHistoryPayload;
+        const loaded: ChatMessageData[] = historyPayload.messages.map((m) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          timestamp: m.timestamp,
+        }));
+        setMessages(loaded);
+        break;
+      }
+
       case "chat.delta": {
         const delta = serverMsg.payload as ChatDeltaPayload;
         const currentStreamId = streamingMsgIdRef.current;

@@ -6,9 +6,15 @@ import type {
   ChatDeltaPayload,
   ChatDonePayload,
   ChatErrorPayload,
+  ChatHistoryRequestPayload,
+  ChatHistoryPayload,
+  ChatHistoryMessage,
 } from "@toshik-babe/shared";
 import { GigaChatProvider } from "./models/gigachat.provider";
 import type { ChatMessage as ProviderChatMessage } from "./models/types";
+import { openDatabase } from "./db/database";
+import { ConversationsDao } from "./db/dao/conversations.dao";
+import { MessagesDao } from "./db/dao/messages.dao";
 
 /** Resolve port: CLI --port flag > PORT env var > default 3001 */
 function resolvePort(): number {
@@ -29,6 +35,11 @@ function resolvePort(): number {
 
 const PORT = resolvePort();
 
+// ── SQLite database & DAOs ─────────────────────────────────────────
+const db = openDatabase();
+const conversationsDao = new ConversationsDao(db);
+const messagesDao = new MessagesDao(db);
+
 // ── GigaChat provider (lazy init: crashes early if key missing) ─────
 let gigachatProvider: GigaChatProvider | null = null;
 
@@ -39,17 +50,28 @@ function getGigaChatProvider(): GigaChatProvider {
   return gigachatProvider;
 }
 
-// ── Per-connection conversation history ────────────────────────────
-// Maps ws → accumulated messages for multi-turn context.
-const conversationHistory = new WeakMap<ServerWebSocket<unknown>, ProviderChatMessage[]>();
+// ── Per-connection conversation tracking ────────────────────────────
+// Maps ws → conversationId (created lazily on first chat.send).
+const wsConversationId = new WeakMap<ServerWebSocket<unknown>, string>();
 
-function getHistory(ws: ServerWebSocket<unknown>): ProviderChatMessage[] {
-  let history = conversationHistory.get(ws);
-  if (!history) {
-    history = [];
-    conversationHistory.set(ws, history);
+/** Get or create a conversation for this WebSocket connection. */
+function getOrCreateConversation(ws: ServerWebSocket<unknown>): string {
+  let convId = wsConversationId.get(ws);
+  if (!convId) {
+    const conv = conversationsDao.create({ title: "Chat" });
+    convId = conv.id;
+    wsConversationId.set(ws, convId);
   }
-  return history;
+  return convId;
+}
+
+/** Load full conversation history from DB as provider messages. */
+function loadHistoryFromDb(conversationId: string): ProviderChatMessage[] {
+  const rows = messagesDao.listByConversation(conversationId, 500);
+  return rows.map((r) => ({
+    role: r.role as ProviderChatMessage["role"],
+    content: r.content,
+  }));
 }
 
 function makeServerMessage(type: ServerMessage["type"], payload: unknown): string {
@@ -63,6 +85,7 @@ function makeServerMessage(type: ServerMessage["type"], payload: unknown): strin
 
 /**
  * Handle "chat.send": stream GigaChat response back as chat.delta / chat.done / chat.error.
+ * Saves user and assistant messages to SQLite and loads full history for context.
  */
 async function handleChatSend(
   ws: ServerWebSocket<unknown>,
@@ -93,9 +116,19 @@ async function handleChatSend(
     return;
   }
 
-  // Append user message to conversation history.
-  const history = getHistory(ws);
-  history.push({ role: "user", content: text.trim() });
+  // Get (or create) the conversation for this connection.
+  const conversationId = getOrCreateConversation(ws);
+
+  // Save user message to the database.
+  const userContent = text.trim();
+  messagesDao.create({
+    conversation_id: conversationId,
+    role: "user",
+    content: userContent,
+  });
+
+  // Load full conversation history from DB for multi-turn context.
+  const history = loadHistoryFromDb(conversationId);
 
   try {
     let fullResponse = "";
@@ -114,9 +147,13 @@ async function handleChatSend(
       );
     }
 
-    // Append assistant response to history for multi-turn.
+    // Save assistant response to the database.
     if (fullResponse.length > 0) {
-      history.push({ role: "assistant", content: fullResponse });
+      messagesDao.create({
+        conversation_id: conversationId,
+        role: "assistant",
+        content: fullResponse,
+      });
     }
 
     // Signal completion.
@@ -136,6 +173,50 @@ async function handleChatSend(
       } satisfies ChatErrorPayload),
     );
   }
+}
+
+/**
+ * Handle "chat.history": fetch stored messages for a conversation and send them to the client.
+ * If the conversation doesn't exist yet, creates it so subsequent chat.send works.
+ */
+function handleChatHistory(
+  ws: ServerWebSocket<unknown>,
+  payload: ChatHistoryRequestPayload,
+): void {
+  const { conversationId } = payload;
+
+  if (!conversationId || typeof conversationId !== "string") {
+    ws.send(
+      makeServerMessage("chat.error", {
+        error: "Missing or invalid conversationId",
+      } satisfies ChatErrorPayload),
+    );
+    return;
+  }
+
+  // Ensure the conversation exists in the database.
+  const existing = conversationsDao.getById(conversationId);
+  if (!existing) {
+    conversationsDao.create({ id: conversationId, title: "Chat" });
+  }
+
+  // Bind this ws to the requested conversation so subsequent chat.send uses the same one.
+  wsConversationId.set(ws, conversationId);
+
+  const rows = messagesDao.listByConversation(conversationId, 500);
+  const messages: ChatHistoryMessage[] = rows.map((r) => ({
+    id: r.id,
+    role: r.role as ChatHistoryMessage["role"],
+    content: r.content,
+    timestamp: r.timestamp,
+  }));
+
+  ws.send(
+    makeServerMessage("chat.history", {
+      conversationId,
+      messages,
+    } satisfies ChatHistoryPayload),
+  );
 }
 
 function handleMessage(ws: ServerWebSocket<unknown>, raw: string | Buffer) {
@@ -168,6 +249,9 @@ function handleMessage(ws: ServerWebSocket<unknown>, raw: string | Buffer) {
     case "chat.send":
       // Fire-and-forget: errors are sent via chat.error WS message.
       void handleChatSend(ws, parsed.payload as ChatSendPayload);
+      break;
+    case "chat.history":
+      handleChatHistory(ws, parsed.payload as ChatHistoryRequestPayload);
       break;
     default:
       ws.send(
