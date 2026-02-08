@@ -1,0 +1,28 @@
+{
+  "name": "@toshik-babe/frontend",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bunx tauri dev",
+    "build": "bunx tauri build",
+    "dev:web": "bun --hot serve.ts",
+    "lint": "eslint src/",
+    "format": "prettier --write src/",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "@tauri-apps/api": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/bun": "latest",
+    "@tauri-apps/cli": "^2.0.0"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

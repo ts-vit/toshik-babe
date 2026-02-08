@@ -1,12 +1,31 @@
 {
   "name": "toshik-babe",
-  "module": "index.ts",
-  "type": "module",
+  "version": "0.1.0",
   "private": true,
-  "devDependencies": {
-    "@types/bun": "latest"
+  "type": "module",
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "dev": "bun run --filter '*' dev",
+    "dev:backend": "bun run --filter @toshik-babe/backend dev",
+    "dev:frontend": "bun run --filter @toshik-babe/frontend dev:web",
+    "build": "bun run --filter '*' build",
+    "build:backend": "bun run --filter @toshik-babe/backend build",
+    "build:frontend": "bun run --filter @toshik-babe/frontend build",
+    "lint": "eslint packages/",
+    "lint:fix": "eslint packages/ --fix",
+    "format": "prettier --write 'packages/**/*.{ts,tsx,json,css,md}'",
+    "format:check": "prettier --check 'packages/**/*.{ts,tsx,json,css,md}'",
+    "typecheck": "bun run --filter '*' typecheck"
   },
-  "peerDependencies": {
-    "typescript": "^5"
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0",
+    "eslint": "^9.0.0",
+    "@eslint/js": "^9.0.0",
+    "typescript-eslint": "^8.0.0",
+    "eslint-plugin-react": "^7.37.0",
+    "eslint-plugin-react-hooks": "^5.0.0",
+    "eslint-config-prettier": "^10.0.0",
+    "prettier": "^3.4.0"
   }
 }
