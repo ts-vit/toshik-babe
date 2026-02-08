@@ -5,9 +5,9 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "dev": "bun --hot src/index.ts",
+    "dev": "bun --env-file=../../.env --hot src/index.ts",
     "build": "bun build src/index.ts --outdir dist --target bun",
-    "start": "bun src/index.ts",
+    "start": "bun --env-file=../../.env src/index.ts",
     "lint": "eslint src/",
     "format": "prettier --write src/",
     "typecheck": "tsc --noEmit"

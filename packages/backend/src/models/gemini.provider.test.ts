@@ -39,7 +39,9 @@ const mockGetGenerativeModel = mock(() => ({
 
 mock.module("@google/generative-ai", () => ({
   GoogleGenerativeAI: class {
-    constructor(_apiKey: string) {}
+    constructor(_apiKey: string) {
+      void _apiKey;
+    }
     getGenerativeModel = mockGetGenerativeModel;
   },
 }));
@@ -86,9 +88,7 @@ describe("GeminiProvider", () => {
   describe("chat()", () => {
     test("returns text and usage metadata", async () => {
       const provider = new GeminiProvider("test-key");
-      const messages: ChatMessage[] = [
-        { role: "user", content: "Hi" },
-      ];
+      const messages: ChatMessage[] = [{ role: "user", content: "Hi" }];
 
       const result = await provider.chat(messages);
 
@@ -151,8 +151,8 @@ describe("GeminiProvider", () => {
       const callArgs = rawArgs[0] as Record<string, unknown>;
       const contents = callArgs["contents"] as Array<{ role: string }>;
       expect(contents).toHaveLength(2);
-      expect(contents[0]!.role).toBe("user");
-      expect(contents[1]!.role).toBe("model");
+      expect(contents[0]?.role).toBe("user");
+      expect(contents[1]?.role).toBe("model");
     });
   });
 

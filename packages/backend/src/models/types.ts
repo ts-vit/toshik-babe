@@ -60,8 +60,5 @@ export interface ModelProvider {
    * Send a conversation and receive an async iterable of text chunks.
    * Use for real-time token streaming to the UI.
    */
-  stream(
-    messages: ChatMessage[],
-    options?: ChatOptions,
-  ): AsyncIterable<StreamChunk>;
+  stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<StreamChunk>;
 }

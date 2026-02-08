@@ -10,7 +10,6 @@
     "beforeBuildCommand": "cd .. && bun run build:web"
   },
   "app": {
-    "title": "Toshik Babe Engine",
     "windows": [
       {
         "title": "Toshik Babe Engine",

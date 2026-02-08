@@ -3,10 +3,29 @@ use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager, State};
+use tauri::{plugin::Builder as PluginBuilder, AppHandle, Manager, RunEvent, Runtime, State};
 
 /// Holds the backend child process so we can kill it on app exit.
 struct BackendProcess(Mutex<Option<Child>>);
+
+/// Plugin that kills the backend process on app exit (Tauri 2 has no Builder::on_event, only in plugins).
+fn backend_cleanup_plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
+    PluginBuilder::new("backend-cleanup").on_event(|app, event| {
+        if let RunEvent::Exit = event {
+            if let Some(state) = app.try_state::<BackendProcess>() {
+                if let Ok(mut guard) = state.0.lock() {
+                    if let Some(ref mut child) = *guard {
+                        let pid = child.id();
+                        log::info!("Killing backend process (pid={})", pid);
+                        let _ = child.kill();
+                        let _ = child.wait();
+                    }
+                    *guard = None;
+                }
+            }
+        }
+    }).build()
+}
 
 /// Scan ports 3001–3010 and return the first available one.
 fn find_available_port() -> Option<u16> {
@@ -141,23 +160,9 @@ fn start_backend(app: AppHandle, state: State<'_, BackendProcess>) -> Result<u16
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(backend_cleanup_plugin())
         .manage(BackendProcess(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![start_backend])
-        .on_event(|app, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                // Kill backend process on app exit.
-                if let Some(state) = app.try_state::<BackendProcess>() {
-                    if let Ok(mut guard) = state.0.lock() {
-                        if let Some(ref mut child) = *guard {
-                            log::info!("Killing backend process (pid={})", child.id());
-                            let _ = child.kill();
-                            let _ = child.wait();
-                        }
-                        *guard = None;
-                    }
-                }
-            }
-        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

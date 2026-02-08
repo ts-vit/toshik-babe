@@ -26,12 +26,7 @@ interface UseWebSocketReturn {
 }
 
 export function useWebSocket(options: UseWebSocketOptions = {}): UseWebSocketReturn {
-  const {
-    url,
-    autoReconnect = true,
-    reconnectDelay = 2000,
-    maxRetries = 10,
-  } = options;
+  const { url, autoReconnect = true, reconnectDelay = 2000, maxRetries = 10 } = options;
 
   const [state, setState] = useState<ConnectionState>(url ? "connecting" : "closed");
   const [lastMessage, setLastMessage] = useState<ServerMessage | null>(null);

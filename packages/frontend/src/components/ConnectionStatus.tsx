@@ -34,29 +34,15 @@ const STATE_CONFIG: Record<
   },
 };
 
-export function ConnectionStatus({
-  state,
-  onReconnect,
-}: ConnectionStatusProps): React.JSX.Element {
+export function ConnectionStatus({ state, onReconnect }: ConnectionStatusProps): React.JSX.Element {
   const { colorClass, glowClass, label } = STATE_CONFIG[state];
 
   return (
     <div className="inline-flex items-center gap-2 rounded-full bg-secondary border border-border px-3 py-1.5 text-sm">
-      <span
-        className={cn(
-          "inline-block h-2 w-2 rounded-full",
-          colorClass,
-          glowClass,
-        )}
-      />
+      <span className={cn("inline-block h-2 w-2 rounded-full", colorClass, glowClass)} />
       <span className="text-muted-foreground">{label}</span>
       {(state === "closed" || state === "error") && onReconnect && (
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onReconnect}
-          className="ml-1 h-6 px-2 text-xs"
-        >
+        <Button variant="ghost" size="sm" onClick={onReconnect} className="ml-1 h-6 px-2 text-xs">
           Reconnect
         </Button>
       )}

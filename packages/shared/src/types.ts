@@ -1,6 +1,12 @@
 /** Supported message types for WebSocket communication. */
 export type ClientMessageType = "ping" | "echo" | "chat.send";
-export type ServerMessageType = "pong" | "echo" | "error" | "chat.delta" | "chat.error" | "chat.done";
+export type ServerMessageType =
+  | "pong"
+  | "echo"
+  | "error"
+  | "chat.delta"
+  | "chat.error"
+  | "chat.done";
 
 /** @deprecated Use ClientMessageType | ServerMessageType instead. */
 export type MessageType = ClientMessageType | ServerMessageType;

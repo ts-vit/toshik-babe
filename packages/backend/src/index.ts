@@ -52,10 +52,7 @@ function getHistory(ws: ServerWebSocket<unknown>): ProviderChatMessage[] {
   return history;
 }
 
-function makeServerMessage(
-  type: ServerMessage["type"],
-  payload: unknown,
-): string {
+function makeServerMessage(type: ServerMessage["type"], payload: unknown): string {
   const msg: ServerMessage = {
     type,
     payload,
@@ -213,6 +210,4 @@ const server = Bun.serve({
   },
 });
 
-console.log(
-  `Toshik Babe Engine backend running on http://localhost:${server.port}`,
-);
+console.log(`Toshik Babe Engine backend running on http://localhost:${server.port}`);

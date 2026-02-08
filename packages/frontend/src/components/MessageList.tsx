@@ -19,9 +19,7 @@ export function MessageList({ messages }: MessageListProps): React.JSX.Element {
       <div className="flex-1 flex items-center justify-center">
         <div className="text-center space-y-2">
           <p className="text-muted-foreground text-lg">No messages yet</p>
-          <p className="text-muted-foreground/60 text-sm">
-            Send a message to get started
-          </p>
+          <p className="text-muted-foreground/60 text-sm">Send a message to get started</p>
         </div>
       </div>
     );

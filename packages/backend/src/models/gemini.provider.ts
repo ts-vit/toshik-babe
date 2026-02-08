@@ -5,13 +5,7 @@ import {
   type GenerationConfig,
 } from "@google/generative-ai";
 
-import type {
-  ChatMessage,
-  ChatOptions,
-  ChatResponse,
-  ModelProvider,
-  StreamChunk,
-} from "./types";
+import type { ChatMessage, ChatOptions, ChatResponse, ModelProvider, StreamChunk } from "./types";
 
 const DEFAULT_MODEL = "gemini-2.0-flash";
 
@@ -48,10 +42,7 @@ function toGeminiContents(messages: ChatMessage[]): Content[] {
 /**
  * Extract system prompt from options or from system-role messages.
  */
-function resolveSystemPrompt(
-  messages: ChatMessage[],
-  options?: ChatOptions,
-): string | undefined {
+function resolveSystemPrompt(messages: ChatMessage[], options?: ChatOptions): string | undefined {
   if (options?.systemPrompt) return options.systemPrompt;
   const systemMsg = messages.find((m) => m.role === "system");
   return systemMsg?.content;
@@ -99,10 +90,7 @@ export class GeminiProvider implements ModelProvider {
     });
   }
 
-  async chat(
-    messages: ChatMessage[],
-    options?: ChatOptions,
-  ): Promise<ChatResponse> {
+  async chat(messages: ChatMessage[], options?: ChatOptions): Promise<ChatResponse> {
     const model = this.getModel(messages, options);
     const contents = toGeminiContents(messages);
 
@@ -126,10 +114,7 @@ export class GeminiProvider implements ModelProvider {
     };
   }
 
-  async *stream(
-    messages: ChatMessage[],
-    options?: ChatOptions,
-  ): AsyncIterable<StreamChunk> {
+  async *stream(messages: ChatMessage[], options?: ChatOptions): AsyncIterable<StreamChunk> {
     const model = this.getModel(messages, options);
     const contents = toGeminiContents(messages);
 

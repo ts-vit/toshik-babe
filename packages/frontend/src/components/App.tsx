@@ -30,9 +30,7 @@ function nextRequestId(): string {
 }
 
 export function App(): React.JSX.Element {
-  const [backendPort, setBackendPort] = useState<number | null>(
-    IS_TAURI ? null : 3001,
-  );
+  const [backendPort, setBackendPort] = useState<number | null>(IS_TAURI ? null : 3001);
   const [startError, setStartError] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessageData[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -78,9 +76,7 @@ export function App(): React.JSX.Element {
           // Append delta text to the existing streaming/placeholder message.
           setMessages((prev) =>
             prev.map((m) =>
-              m.id === currentStreamId
-                ? { ...m, content: m.content + delta.text }
-                : m,
+              m.id === currentStreamId ? { ...m, content: m.content + delta.text } : m,
             ),
           );
         }
@@ -93,9 +89,7 @@ export function App(): React.JSX.Element {
         const doneId = streamingMsgIdRef.current;
         if (doneId) {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === doneId ? { ...m, isStreaming: false } : m,
-            ),
+            prev.map((m) => (m.id === doneId ? { ...m, isStreaming: false } : m)),
           );
         }
         streamingMsgIdRef.current = null;
@@ -109,9 +103,7 @@ export function App(): React.JSX.Element {
         const errStreamId = streamingMsgIdRef.current;
         if (errStreamId) {
           setMessages((prev) =>
-            prev.map((m) =>
-              m.id === errStreamId ? { ...m, isStreaming: false } : m,
-            ),
+            prev.map((m) => (m.id === errStreamId ? { ...m, isStreaming: false } : m)),
           );
         }
         streamingMsgIdRef.current = null;
@@ -196,9 +188,7 @@ export function App(): React.JSX.Element {
     return (
       <div className="flex flex-col items-center justify-center h-screen w-full">
         <h1 className="text-2xl font-bold">Toshik Babe Engine</h1>
-        <p className="text-destructive mt-2">
-          Failed to start backend: {startError}
-        </p>
+        <p className="text-destructive mt-2">Failed to start backend: {startError}</p>
       </div>
     );
   }
@@ -218,10 +208,7 @@ export function App(): React.JSX.Element {
       <MessageList messages={messages} />
 
       {/* Input — disabled while streaming or disconnected */}
-      <ChatInput
-        onSend={handleSend}
-        disabled={state !== "open" || isStreaming}
-      />
+      <ChatInput onSend={handleSend} disabled={state !== "open" || isStreaming} />
     </div>
   );
 }

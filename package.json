@@ -5,27 +5,29 @@
   "type": "module",
   "workspaces": ["packages/*"],
   "scripts": {
-    "dev": "bun run --filter '*' dev",
-    "dev:backend": "bun run --filter @toshik-babe/backend dev",
-    "dev:frontend": "bun run --filter @toshik-babe/frontend dev:web",
-    "build": "bun run --filter '*' build",
-    "build:backend": "bun run --filter @toshik-babe/backend build",
-    "build:frontend": "bun run --filter @toshik-babe/frontend build",
+    "dev": "bunx concurrently \"bun run dev:backend\" \"bun run dev:frontend\"",
+    "dev:backend": "bun run --cwd packages/backend dev",
+    "dev:frontend": "bun run --cwd packages/frontend dev",
+    "dev:web": "bun run --cwd packages/frontend dev:web",
+    "build:web": "bun run --cwd packages/frontend build:web",
+    "build": "bunx concurrently \"bun run build:backend\" \"bun run build:frontend\"",
+    "build:backend": "bun run --cwd packages/backend build",
+    "build:frontend": "bun run --cwd packages/frontend build",
     "lint": "eslint packages/",
     "lint:fix": "eslint packages/ --fix",
     "format": "prettier --write 'packages/**/*.{ts,tsx,json,css,md}'",
     "format:check": "prettier --check 'packages/**/*.{ts,tsx,json,css,md}'",
-    "typecheck": "bun run --filter '*' typecheck"
+    "typecheck": "bun run --cwd packages/shared typecheck && bun run --cwd packages/backend typecheck && bun run --cwd packages/frontend typecheck"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "typescript": "^5.7.0",
-    "eslint": "^9.0.0",
-    "@eslint/js": "^9.0.0",
-    "typescript-eslint": "^8.0.0",
+    "typescript": "^5.9.3",
+    "eslint": "^9.23.0",
+    "@eslint/js": "^9.23.0",
+    "typescript-eslint": "^8.54.0",
     "eslint-plugin-react": "^7.37.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "eslint-config-prettier": "^10.0.0",
-    "prettier": "^3.4.0"
+    "prettier": "^3.8.1"
   }
 }
