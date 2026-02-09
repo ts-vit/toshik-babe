@@ -1,5 +1,5 @@
 /** Supported message types for WebSocket communication. */
-export type ClientMessageType = "ping" | "echo" | "chat.send" | "chat.history" | "chat.list" | "chat.create";
+export type ClientMessageType = "ping" | "echo" | "chat.send" | "chat.history" | "chat.list" | "chat.create" | "provider.config";
 export type ServerMessageType =
   | "pong"
   | "echo"
@@ -9,7 +9,8 @@ export type ServerMessageType =
   | "chat.done"
   | "chat.history"
   | "chat.list"
-  | "chat.create";
+  | "chat.create"
+  | "provider.config.ack";
 
 /** @deprecated Use ClientMessageType | ServerMessageType instead. */
 export type MessageType = ClientMessageType | ServerMessageType;
@@ -113,4 +114,31 @@ export interface ChatListPayload {
 export interface ChatCreateResponsePayload {
   id: string;
   title: string;
+}
+
+// ── Provider config payload types ──────────────────────────────────
+
+/** Supported provider identifiers for provider.config. */
+export type ProviderConfigId = "gemini" | "gigachat" | "anthropic" | "ollama";
+
+/** Payload for client → server "provider.config" (set provider API key at runtime). */
+export interface ProviderConfigPayload {
+  /** Provider identifier. */
+  provider: ProviderConfigId;
+  /** API key or access token for the provider. */
+  apiKey: string;
+  /** Optional default model override. */
+  defaultModel?: string;
+  /** Optional base URL (e.g. for Ollama). */
+  baseURL?: string;
+}
+
+/** Payload for server → client "provider.config.ack" (confirmation). */
+export interface ProviderConfigAckPayload {
+  /** Provider that was configured. */
+  provider: ProviderConfigId;
+  /** Whether configuration succeeded. */
+  success: boolean;
+  /** Error message if success is false. */
+  error?: string;
 }

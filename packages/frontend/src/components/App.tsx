@@ -11,6 +11,9 @@ import type {
   ChatListItem,
   ChatListPayload,
   ChatCreateResponsePayload,
+  ProviderConfigPayload,
+  ProviderConfigAckPayload,
+  ProviderConfigId,
 } from "@toshik-babe/shared";
 import { useWebSocket } from "../hooks/useWebSocket";
 import { ConnectionStatus } from "./ConnectionStatus";
@@ -18,6 +21,7 @@ import { ChatInput } from "./ChatInput";
 import { MessageList } from "./MessageList";
 import { Sidebar } from "./Sidebar";
 import type { ChatMessageData } from "./ChatMessage";
+import { getSecret } from "../lib/stronghold";
 
 /** Detect if we're running inside Tauri (desktop) or plain browser. */
 const IS_TAURI =
@@ -76,10 +80,32 @@ export function App(): React.JSX.Element {
   const wsUrl = backendPort ? `ws://localhost:${backendPort}/ws` : undefined;
   const { state, lastMessage, send, reconnect } = useWebSocket({ url: wsUrl });
 
-  // Request conversation list when WebSocket connects.
+  // Send provider config and request conversation list when WebSocket connects.
   useEffect(() => {
     if (state === "open" && !initialRequestedRef.current) {
       initialRequestedRef.current = true;
+
+      // Send stored API key from Stronghold to the backend (fire-and-forget).
+      const DEFAULT_PROVIDER: ProviderConfigId = "gigachat";
+      void (async () => {
+        try {
+          const apiKey = await getSecret(DEFAULT_PROVIDER);
+          if (apiKey) {
+            const configMsg: ClientMessage = {
+              type: "provider.config",
+              payload: {
+                provider: DEFAULT_PROVIDER,
+                apiKey,
+              } satisfies ProviderConfigPayload,
+              timestamp: new Date().toISOString(),
+            };
+            send(configMsg);
+          }
+        } catch (err) {
+          console.error("[App] Failed to send provider config from Stronghold:", err);
+        }
+      })();
+
       setSidebarLoading(true);
       const listReq: ClientMessage = {
         type: "chat.list",
@@ -230,6 +256,16 @@ export function App(): React.JSX.Element {
             timestamp: serverMsg.timestamp ?? new Date().toISOString(),
           },
         ]);
+        break;
+      }
+
+      case "provider.config.ack": {
+        const ack = serverMsg.payload as ProviderConfigAckPayload;
+        if (ack.success) {
+          console.log(`[App] Provider "${ack.provider}" configured successfully`);
+        } else {
+          console.error(`[App] Provider "${ack.provider}" config failed: ${ack.error}`);
+        }
         break;
       }
 

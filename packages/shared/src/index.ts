@@ -16,4 +16,7 @@ export type {
   ChatListItem,
   ChatListPayload,
   ChatCreateResponsePayload,
+  ProviderConfigId,
+  ProviderConfigPayload,
+  ProviderConfigAckPayload,
 } from "./types";

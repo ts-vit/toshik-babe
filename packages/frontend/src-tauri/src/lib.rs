@@ -179,6 +179,17 @@ pub fn run() {
         .plugin(backend_cleanup_plugin())
         .manage(BackendProcess(Mutex::new(None)))
         .invoke_handler(tauri::generate_handler![start_backend])
+        .setup(|app| {
+            // Stronghold needs a salt file for argon2 key derivation.
+            let salt_path = app
+                .path()
+                .app_local_data_dir()
+                .expect("could not resolve app local data path")
+                .join("stronghold-salt.txt");
+            app.handle()
+                .plugin(tauri_plugin_stronghold::Builder::with_argon2(&salt_path).build())?;
+            Ok(())
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

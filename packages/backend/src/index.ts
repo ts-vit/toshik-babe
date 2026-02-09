@@ -12,9 +12,12 @@ import type {
   ChatCreatePayload,
   ChatListPayload,
   ChatCreateResponsePayload,
+  ProviderConfigPayload,
+  ProviderConfigAckPayload,
 } from "@toshik-babe/shared";
+import { ModelProviderFactory, type ProviderId } from "./models/factory";
+import type { ModelProvider, ChatMessage as ProviderChatMessage } from "./models/types";
 import { GigaChatProvider } from "./models/gigachat.provider";
-import type { ChatMessage as ProviderChatMessage } from "./models/types";
 import { openDatabase } from "./db/database";
 import { ConversationsDao } from "./db/dao/conversations.dao";
 import { MessagesDao } from "./db/dao/messages.dao";
@@ -43,14 +46,39 @@ const db = openDatabase();
 const conversationsDao = new ConversationsDao(db);
 const messagesDao = new MessagesDao(db);
 
-// ── GigaChat provider (lazy init: crashes early if key missing) ─────
-let gigachatProvider: GigaChatProvider | null = null;
+// ── Model provider (configurable at runtime via provider.config) ─────
+let activeProvider: ModelProvider | null = null;
 
-function getGigaChatProvider(): GigaChatProvider {
-  if (!gigachatProvider) {
-    gigachatProvider = new GigaChatProvider(process.env["GIGACHAT_API_KEY"]);
+/** Get the currently active provider, falling back to GigaChat from env. */
+function getActiveProvider(): ModelProvider {
+  if (!activeProvider) {
+    // Fallback: try to init GigaChat from environment variable.
+    const envKey = process.env["GIGACHAT_API_KEY"];
+    if (envKey) {
+      activeProvider = new GigaChatProvider(envKey);
+    } else {
+      throw new Error(
+        "No provider configured. Send a provider.config message with an API key, " +
+        "or set the GIGACHAT_API_KEY environment variable.",
+      );
+    }
   }
-  return gigachatProvider;
+  return activeProvider;
+}
+
+/** Re-initialize the active provider with new credentials. */
+function configureProvider(
+  providerId: ProviderId,
+  apiKey: string,
+  defaultModel?: string,
+  baseURL?: string,
+): void {
+  activeProvider = ModelProviderFactory.create(providerId, {
+    apiKey,
+    defaultModel,
+    baseURL,
+  });
+  console.log(`[provider] Configured provider: ${providerId}`);
 }
 
 // ── Per-connection conversation tracking ────────────────────────────
@@ -106,9 +134,9 @@ async function handleChatSend(
     return;
   }
 
-  let provider: GigaChatProvider;
+  let provider: ModelProvider;
   try {
-    provider = getGigaChatProvider();
+    provider = getActiveProvider();
   } catch (err) {
     ws.send(
       makeServerMessage("chat.error", {
@@ -242,6 +270,69 @@ function handleChatList(ws: ServerWebSocket<unknown>): void {
 }
 
 /**
+ * Handle "provider.config": re-initialize the model provider with the given API key.
+ */
+function handleProviderConfig(
+  ws: ServerWebSocket<unknown>,
+  payload: ProviderConfigPayload,
+): void {
+  const { provider, apiKey, defaultModel, baseURL } = payload;
+
+  if (!provider || typeof provider !== "string") {
+    ws.send(
+      makeServerMessage("provider.config.ack", {
+        provider: provider ?? "unknown",
+        success: false,
+        error: "Missing or invalid provider field",
+      } satisfies ProviderConfigAckPayload),
+    );
+    return;
+  }
+
+  if (!apiKey || typeof apiKey !== "string" || apiKey.trim().length === 0) {
+    ws.send(
+      makeServerMessage("provider.config.ack", {
+        provider,
+        success: false,
+        error: "Missing or empty apiKey",
+      } satisfies ProviderConfigAckPayload),
+    );
+    return;
+  }
+
+  const supportedIds = ModelProviderFactory.supportedIds();
+  if (!supportedIds.includes(provider as ProviderId)) {
+    ws.send(
+      makeServerMessage("provider.config.ack", {
+        provider,
+        success: false,
+        error: `Unknown provider "${provider}". Supported: ${supportedIds.join(", ")}`,
+      } satisfies ProviderConfigAckPayload),
+    );
+    return;
+  }
+
+  try {
+    configureProvider(provider as ProviderId, apiKey.trim(), defaultModel, baseURL);
+    ws.send(
+      makeServerMessage("provider.config.ack", {
+        provider,
+        success: true,
+      } satisfies ProviderConfigAckPayload),
+    );
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    ws.send(
+      makeServerMessage("provider.config.ack", {
+        provider,
+        success: false,
+        error: errorMsg,
+      } satisfies ProviderConfigAckPayload),
+    );
+  }
+}
+
+/**
  * Handle "chat.create": create a new conversation and return its ID + title.
  * Also binds the WebSocket to the new conversation.
  */
@@ -302,6 +393,9 @@ function handleMessage(ws: ServerWebSocket<unknown>, raw: string | Buffer) {
       break;
     case "chat.create":
       handleChatCreate(ws, parsed.payload as ChatCreatePayload | undefined);
+      break;
+    case "provider.config":
+      handleProviderConfig(ws, parsed.payload as ProviderConfigPayload);
       break;
     default:
       ws.send(
