@@ -21,6 +21,7 @@ import { ChatInput } from "./ChatInput";
 import { MessageList } from "./MessageList";
 import { Sidebar } from "./Sidebar";
 import type { ChatMessageData } from "./ChatMessage";
+import { SettingsModal } from "./SettingsModal";
 import { getSecret } from "../lib/stronghold";
 
 /** Detect if we're running inside Tauri (desktop) or plain browser. */
@@ -49,6 +50,9 @@ export function App(): React.JSX.Element {
   const [conversations, setConversations] = useState<ChatListItem[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [sidebarLoading, setSidebarLoading] = useState(false);
+
+  // Settings modal state
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   // Track the assistant message ID currently being streamed into.
   const streamingMsgIdRef = useRef<string | null>(null);
@@ -345,8 +349,12 @@ export function App(): React.JSX.Element {
         activeId={activeConversationId}
         onSelect={handleSelectConversation}
         onNewChat={handleNewChat}
+        onSettingsOpen={() => setSettingsOpen(true)}
         loading={sidebarLoading}
       />
+
+      {/* Settings Modal */}
+      <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} wsSend={send} />
 
       {/* Main chat area */}
       <div className="flex flex-col flex-1 min-w-0">
