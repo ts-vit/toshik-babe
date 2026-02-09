@@ -39,13 +39,17 @@ export class GigaChatProvider implements ModelProvider {
     this.openai = createOpenAI({
       apiKey: "oauth-managed",
       baseURL: GIGACHAT_BASE_URL,
-      compatibility: "compatible",
-      fetch: async (url, init) => {
+      fetch: (async (url, init) => {
         const token = await this.getAccessToken();
         const headers = new Headers(init?.headers);
         headers.set("Authorization", `Bearer ${token}`);
-        return fetch(url, { ...init, headers });
-      },
+        const res = await fetch(url, { ...init, headers });
+        if (res.status === 401) {
+          this.tokenData = null;
+          this.tokenPromise = null;
+        }
+        return res;
+      }) as typeof fetch,
     });
   }
 
@@ -67,15 +71,16 @@ export class GigaChatProvider implements ModelProvider {
   private async fetchToken(): Promise<TokenData> {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), AUTH_TIMEOUT_MS);
+    const oauthHeaders = new Headers({
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+      Authorization: `Basic ${this.credentials}`,
+    });
     const doFetch = async (): Promise<Response> => {
+      oauthHeaders.set("RqUID", crypto.randomUUID());
       return fetch(GIGACHAT_AUTH_URL, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          Accept: "application/json",
-          Authorization: `Basic ${this.credentials}`,
-          RqUID: crypto.randomUUID(),
-        },
+        headers: oauthHeaders,
         body: new URLSearchParams({ scope: this.scope }).toString(),
         signal: controller.signal,
       });
@@ -89,19 +94,30 @@ export class GigaChatProvider implements ModelProvider {
       clearTimeout(timeoutId);
       if (!res.ok) {
         const body = await res.text();
-        throw new Error(
-          `GigaChat OAuth failed: ${res.status} ${res.statusText}${body ? ` — ${body}` : ""}`,
-        );
+        const msg = `GigaChat OAuth failed: ${res.status} ${res.statusText}${body ? " - " + body : ""}`;
+        console.error("[GigaChat]", msg);
+        throw new Error(msg);
       }
-      const data = (await res.json()) as { access_token?: string; expires_at?: number };
+      const data = (await res.json()) as {
+        access_token?: string;
+        expires_at?: number;
+        expires_in?: number;
+      };
       const accessToken = data.access_token;
-      const expiresAt = data.expires_at;
-      if (!accessToken || typeof expiresAt !== "number") {
-        throw new Error("GigaChat OAuth: invalid response (missing access_token or expires_at)");
+      if (!accessToken) {
+        throw new Error("GigaChat OAuth: invalid response (missing access_token)");
       }
+      // GigaChat может вернуть expires_at (Unix sec) или expires_in (секунды до истечения)
+      const now = Date.now();
+      const expiresAt =
+        typeof data.expires_at === "number"
+          ? data.expires_at * 1000
+          : typeof data.expires_in === "number"
+            ? now + data.expires_in * 1000
+            : now + 25 * 60 * 1000; // 25 мин по умолчанию
       return {
         accessToken,
-        expiresAt: expiresAt * 1000,
+        expiresAt,
       };
     } catch (err) {
       clearTimeout(timeoutId);
