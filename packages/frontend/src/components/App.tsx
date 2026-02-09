@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   ClientMessage,
   ServerMessage,
+  Attachment,
+  AttachmentMeta,
   ChatSendPayload,
   ChatDeltaPayload,
   ChatErrorPayload,
@@ -208,6 +210,7 @@ export function App(): React.JSX.Element {
             role: m.role,
             content: m.content,
             timestamp: m.timestamp,
+            attachmentMetas: m.attachments,
           }));
           setMessages(loaded);
         }
@@ -289,10 +292,17 @@ export function App(): React.JSX.Element {
   }, [lastMessage]);
 
   const handleSend = useCallback(
-    (text: string) => {
+    (text: string, attachments?: Attachment[]) => {
       const assistantId = nextId();
       streamingMsgIdRef.current = assistantId;
       setIsStreaming(true);
+
+      // Build lightweight attachment metadata for the local message display.
+      const attachmentMetas: AttachmentMeta[] | undefined = attachments?.map((a) => ({
+        id: a.id,
+        type: a.type,
+        name: a.name,
+      }));
 
       setMessages((prev) => [
         ...prev,
@@ -301,6 +311,7 @@ export function App(): React.JSX.Element {
           role: "user" as const,
           content: text,
           timestamp: new Date().toISOString(),
+          attachments: attachments, // full data for local preview
         },
         {
           id: assistantId,
@@ -314,7 +325,11 @@ export function App(): React.JSX.Element {
       const requestId = nextRequestId();
       const msg: ClientMessage = {
         type: "chat.send",
-        payload: { text, requestId } satisfies ChatSendPayload,
+        payload: {
+          text,
+          requestId,
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+        } satisfies ChatSendPayload,
         timestamp: new Date().toISOString(),
       };
       send(msg);
@@ -325,24 +340,31 @@ export function App(): React.JSX.Element {
   // Loading state while waiting for backend in Tauri mode.
   if (IS_TAURI && !backendPort && !startError) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen w-full">
-        <h1 className="text-2xl font-bold">Toshik Babe Engine</h1>
-        <p className="text-muted-foreground mt-2">Starting backend…</p>
+      <div className="flex flex-col items-center justify-center h-screen w-full bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <div className="h-10 w-10 rounded-xl bg-primary/20 flex items-center justify-center">
+            <div className="h-5 w-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          </div>
+          <h1 className="text-xl font-semibold text-foreground">Toshik Babe Engine</h1>
+          <p className="text-sm text-muted-foreground">Starting backend...</p>
+        </div>
       </div>
     );
   }
 
   if (startError) {
     return (
-      <div className="flex flex-col items-center justify-center h-screen w-full">
-        <h1 className="text-2xl font-bold">Toshik Babe Engine</h1>
-        <p className="text-destructive mt-2">Failed to start backend: {startError}</p>
+      <div className="flex flex-col items-center justify-center h-screen w-full bg-background">
+        <div className="flex flex-col items-center gap-3">
+          <h1 className="text-xl font-semibold text-foreground">Toshik Babe Engine</h1>
+          <p className="text-sm text-destructive">Failed to start backend: {startError}</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen w-full">
+    <div className="flex h-screen w-screen overflow-hidden bg-background">
       {/* Sidebar */}
       <Sidebar
         conversations={conversations}
@@ -357,12 +379,17 @@ export function App(): React.JSX.Element {
       <SettingsModal open={settingsOpen} onOpenChange={setSettingsOpen} wsSend={send} />
 
       {/* Main chat area */}
-      <div className="flex flex-col flex-1 min-w-0">
+      <main className="flex flex-col flex-1 min-w-0 h-screen">
         {/* Header */}
-        <header className="flex items-center justify-between border-b border-border px-4 py-3 shrink-0">
-          <div>
-            <h1 className="text-lg font-semibold">Toshik Babe Engine</h1>
-            <p className="text-xs text-muted-foreground">Local-first AI assistant</p>
+        <header className="flex items-center justify-between border-b border-border px-5 py-3 shrink-0 bg-background/80 backdrop-blur-sm">
+          <div className="flex items-center gap-3">
+            <div className="h-8 w-8 rounded-lg bg-primary/20 flex items-center justify-center">
+              <span className="text-primary text-sm font-bold">TB</span>
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold text-foreground leading-tight">Toshik Babe Engine</h1>
+              <p className="text-[11px] text-muted-foreground leading-tight">Local-first AI assistant</p>
+            </div>
           </div>
           <ConnectionStatus state={state} onReconnect={reconnect} />
         </header>
@@ -372,17 +399,17 @@ export function App(): React.JSX.Element {
 
         {/* Input — disabled while streaming or disconnected */}
         <ChatInput onSend={handleSend} disabled={state !== "open" || isStreaming} />
-      </div>
+      </main>
     </div>
   );
 }
 
 /** Format server message payload into readable text for the chat bubble (legacy types). */
 function formatServerPayload(msg: ServerMessage): string {
-  if (msg.type === "pong") return "🏓 Pong!";
+  if (msg.type === "pong") return "Pong!";
   if (msg.type === "error") {
     const payload = msg.payload as Record<string, unknown> | null;
-    return `⚠️ Error: ${payload?.["message"] ?? JSON.stringify(payload)}`;
+    return `Error: ${payload?.["message"] ?? JSON.stringify(payload)}`;
   }
   // echo or unknown
   const payload = msg.payload as Record<string, unknown> | null;

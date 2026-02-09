@@ -34,6 +34,23 @@ const MIGRATIONS: ReadonlyArray<{ version: number; sql: string }> = [
         ON messages(conversation_id);
     `,
   },
+  {
+    version: 2,
+    sql: `
+      CREATE TABLE IF NOT EXISTS attachments (
+        id          TEXT PRIMARY KEY NOT NULL,
+        message_id  TEXT NOT NULL,
+        type        TEXT NOT NULL,
+        name        TEXT NOT NULL DEFAULT '',
+        file_path   TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+        FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_attachments_message_id
+        ON attachments(message_id);
+    `,
+  },
 ];
 
 /**

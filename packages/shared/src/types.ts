@@ -35,6 +35,23 @@ export interface ServerMessage extends Message {
   type: ServerMessageType;
 }
 
+// ── Attachment types ───────────────────────────────────────────────
+
+/** MIME types accepted for image attachments. */
+export type AttachmentMimeType = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
+
+/** A file attachment sent alongside a chat message. */
+export interface Attachment {
+  /** Unique attachment identifier. */
+  id: string;
+  /** MIME type of the attachment. */
+  type: AttachmentMimeType;
+  /** Base64-encoded file data (no data-URI prefix). */
+  data: string;
+  /** Original file name. */
+  name: string;
+}
+
 // ── Chat-specific payload types ────────────────────────────────────
 
 /** Payload for client → server "chat.send". */
@@ -43,6 +60,8 @@ export interface ChatSendPayload {
   text: string;
   /** Optional request ID for correlating responses. */
   requestId?: string;
+  /** Optional image attachments. */
+  attachments?: Attachment[];
 }
 
 /** Payload for server → client "chat.delta" (streaming token). */
@@ -73,12 +92,21 @@ export interface ChatHistoryRequestPayload {
   conversationId: string;
 }
 
+/** Attachment metadata returned with history (no raw data). */
+export interface AttachmentMeta {
+  id: string;
+  type: AttachmentMimeType;
+  name: string;
+}
+
 /** A single message entry in the history payload. */
 export interface ChatHistoryMessage {
   id: string;
   role: "user" | "assistant" | "system";
   content: string;
   timestamp: string;
+  /** Attachment metadata (without base64 data). */
+  attachments?: AttachmentMeta[];
 }
 
 /** Payload for server → client "chat.history" (conversation history). */

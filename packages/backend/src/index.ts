@@ -2,6 +2,8 @@ import type { ServerWebSocket } from "bun";
 import type {
   ClientMessage,
   ServerMessage,
+  Attachment,
+  AttachmentMeta,
   ChatSendPayload,
   ChatDeltaPayload,
   ChatDonePayload,
@@ -15,12 +17,15 @@ import type {
   ProviderConfigPayload,
   ProviderConfigAckPayload,
 } from "@toshik-babe/shared";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { ModelProviderFactory, type ProviderId } from "./models/factory";
-import type { ModelProvider, ChatMessage as ProviderChatMessage } from "./models/types";
+import type { ModelProvider, ChatMessage as ProviderChatMessage, ChatMessageAttachment } from "./models/types";
 import { GigaChatProvider } from "./models/gigachat.provider";
 import { openDatabase } from "./db/database";
 import { ConversationsDao } from "./db/dao/conversations.dao";
 import { MessagesDao } from "./db/dao/messages.dao";
+import { AttachmentsDao } from "./db/dao/attachments.dao";
 
 /** Resolve port: CLI --port flag > PORT env var > default 3001 */
 function resolvePort(): number {
@@ -45,6 +50,11 @@ const PORT = resolvePort();
 const db = openDatabase();
 const conversationsDao = new ConversationsDao(db);
 const messagesDao = new MessagesDao(db);
+const attachmentsDao = new AttachmentsDao(db);
+
+// ── Attachments storage directory ──────────────────────────────────
+const ATTACHMENTS_DIR = resolve(import.meta.dir, "../../data/attachments");
+mkdirSync(ATTACHMENTS_DIR, { recursive: true });
 
 // ── Model provider (configurable at runtime via provider.config) ─────
 let activeProvider: ModelProvider | null = null;
@@ -96,13 +106,51 @@ function getOrCreateConversation(ws: ServerWebSocket<unknown>): string {
   return convId;
 }
 
-/** Load full conversation history from DB as provider messages. */
+/** Load full conversation history from DB as provider messages (with attachment data). */
 function loadHistoryFromDb(conversationId: string): ProviderChatMessage[] {
   const rows = messagesDao.listByConversation(conversationId, 500);
-  return rows.map((r) => ({
-    role: r.role as ProviderChatMessage["role"],
-    content: r.content,
-  }));
+  const messageIds = rows.map((r) => r.id);
+  const allAttachments = attachmentsDao.listByMessages(messageIds);
+
+  // Group attachments by message_id.
+  const attachmentsByMsg = new Map<string, typeof allAttachments>();
+  for (const att of allAttachments) {
+    const existing = attachmentsByMsg.get(att.message_id) ?? [];
+    existing.push(att);
+    attachmentsByMsg.set(att.message_id, existing);
+  }
+
+  return rows.map((r) => {
+    const msgAttachments = attachmentsByMsg.get(r.id);
+    const providerAttachments: ChatMessageAttachment[] | undefined = msgAttachments?.map((a) => {
+      // Read file data from disk for provider context.
+      try {
+        const fileData = Bun.file(a.file_path);
+        // We'll load data lazily when the provider needs it — store metadata for now.
+        return {
+          id: a.id,
+          type: a.type,
+          name: a.name,
+          filePath: a.file_path,
+        };
+      } catch {
+        return {
+          id: a.id,
+          type: a.type,
+          name: a.name,
+          filePath: a.file_path,
+        };
+      }
+    });
+
+    return {
+      role: r.role as ProviderChatMessage["role"],
+      content: r.content,
+      ...(providerAttachments && providerAttachments.length > 0
+        ? { attachments: providerAttachments }
+        : {}),
+    };
+  });
 }
 
 function makeServerMessage(type: ServerMessage["type"], payload: unknown): string {
@@ -152,11 +200,34 @@ async function handleChatSend(
 
   // Save user message to the database.
   const userContent = text.trim();
-  messagesDao.create({
+  const userMsg = messagesDao.create({
     conversation_id: conversationId,
     role: "user",
     content: userContent,
   });
+
+  // Save attachments to disk and DB.
+  const incomingAttachments = payload.attachments;
+  if (incomingAttachments && incomingAttachments.length > 0) {
+    for (const att of incomingAttachments) {
+      try {
+        const ext = att.type.split("/")[1] ?? "bin";
+        const fileName = `${att.id}.${ext}`;
+        const filePath = resolve(ATTACHMENTS_DIR, fileName);
+        const buffer = Buffer.from(att.data, "base64");
+        writeFileSync(filePath, buffer);
+        attachmentsDao.create({
+          id: att.id,
+          message_id: userMsg.id,
+          type: att.type,
+          name: att.name,
+          file_path: filePath,
+        });
+      } catch (err) {
+        console.error(`[chat] failed to save attachment ${att.id}:`, err);
+      }
+    }
+  }
 
   // Load full conversation history from DB for multi-turn context.
   const history = loadHistoryFromDb(conversationId);
@@ -235,11 +306,21 @@ function handleChatHistory(
   wsConversationId.set(ws, conversationId);
 
   const rows = messagesDao.listByConversation(conversationId, 500);
+  const msgIds = rows.map((r) => r.id);
+  const allAtt = attachmentsDao.listByMessages(msgIds);
+  const attByMsg = new Map<string, AttachmentMeta[]>();
+  for (const a of allAtt) {
+    const list = attByMsg.get(a.message_id) ?? [];
+    list.push({ id: a.id, type: a.type as AttachmentMeta["type"], name: a.name });
+    attByMsg.set(a.message_id, list);
+  }
+
   const messages: ChatHistoryMessage[] = rows.map((r) => ({
     id: r.id,
     role: r.role as ChatHistoryMessage["role"],
     content: r.content,
     timestamp: r.timestamp,
+    ...(attByMsg.has(r.id) ? { attachments: attByMsg.get(r.id) } : {}),
   }));
 
   ws.send(

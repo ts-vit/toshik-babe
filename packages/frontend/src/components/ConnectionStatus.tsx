@@ -1,7 +1,7 @@
 import React from "react";
 import type { ConnectionState } from "../hooks/useWebSocket";
 import { cn } from "../lib/utils";
-import { Button } from "./ui/button";
+import { RefreshCw } from "lucide-react";
 
 interface ConnectionStatusProps {
   state: ConnectionState;
@@ -10,41 +10,42 @@ interface ConnectionStatusProps {
 
 const STATE_CONFIG: Record<
   ConnectionState,
-  { colorClass: string; glowClass: string; label: string }
+  { dotColor: string; label: string }
 > = {
   connecting: {
-    colorClass: "bg-yellow-500",
-    glowClass: "shadow-[0_0_6px_theme(colors.yellow.500)]",
-    label: "Connecting…",
+    dotColor: "bg-yellow-500",
+    label: "Connecting...",
   },
   open: {
-    colorClass: "bg-green-500",
-    glowClass: "shadow-[0_0_6px_theme(colors.green.500)]",
+    dotColor: "bg-green-500",
     label: "Connected",
   },
   closed: {
-    colorClass: "bg-red-500",
-    glowClass: "shadow-[0_0_6px_theme(colors.red.500)]",
+    dotColor: "bg-red-500",
     label: "Disconnected",
   },
   error: {
-    colorClass: "bg-red-500",
-    glowClass: "shadow-[0_0_6px_theme(colors.red.500)]",
+    dotColor: "bg-red-500",
     label: "Error",
   },
 };
 
 export function ConnectionStatus({ state, onReconnect }: ConnectionStatusProps): React.JSX.Element {
-  const { colorClass, glowClass, label } = STATE_CONFIG[state];
+  const { dotColor, label } = STATE_CONFIG[state];
 
   return (
-    <div className="inline-flex items-center gap-2 rounded-full bg-secondary border border-border px-3 py-1.5 text-sm">
-      <span className={cn("inline-block h-2 w-2 rounded-full", colorClass, glowClass)} />
+    <div className="inline-flex items-center gap-2 rounded-full bg-muted/50 border border-border/50 px-3 py-1.5 text-xs">
+      <span className={cn("inline-block h-1.5 w-1.5 rounded-full", dotColor)} />
       <span className="text-muted-foreground">{label}</span>
       {(state === "closed" || state === "error") && onReconnect && (
-        <Button variant="ghost" size="sm" onClick={onReconnect} className="ml-1 h-6 px-2 text-xs">
-          Reconnect
-        </Button>
+        <button
+          type="button"
+          onClick={onReconnect}
+          className="ml-1 text-muted-foreground hover:text-foreground transition-colors"
+          aria-label="Reconnect"
+        >
+          <RefreshCw className="h-3 w-3" />
+        </button>
       )}
     </div>
   );

@@ -5,10 +5,24 @@
  * interface so the rest of the backend stays provider-agnostic.
  */
 
+/** Attachment metadata carried with a chat message for providers. */
+export interface ChatMessageAttachment {
+  /** Unique attachment ID. */
+  id: string;
+  /** MIME type (e.g. "image/png"). */
+  type: string;
+  /** Original file name. */
+  name: string;
+  /** Absolute path to the file on disk. */
+  filePath: string;
+}
+
 /** A single message in a chat conversation. */
 export interface ChatMessage {
   role: "user" | "assistant" | "system";
   content: string;
+  /** Optional image attachments. */
+  attachments?: ChatMessageAttachment[];
 }
 
 /** Options passed to chat / stream calls. */

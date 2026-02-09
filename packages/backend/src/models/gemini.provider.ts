@@ -1,5 +1,6 @@
-import { generateText, streamText } from "ai";
+import { generateText, streamText, type CoreMessage, type ImagePart, type TextPart } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { readFileSync } from "node:fs";
 
 import type { ChatMessage, ChatOptions, ChatResponse, ModelProvider, StreamChunk } from "./types";
 
@@ -25,6 +26,7 @@ export class GeminiProvider implements ModelProvider {
 
   /**
    * Build Vercel AI SDK messages from our ChatMessage[], extracting system prompt.
+   * Messages with attachments produce multimodal content (text + image parts).
    */
   private buildParams(messages: ChatMessage[], options?: ChatOptions) {
     const modelId = options?.model ?? this.defaultModel;
@@ -37,12 +39,43 @@ export class GeminiProvider implements ModelProvider {
     }
 
     // Filter out system messages — they are passed via the `system` parameter.
-    const coreMessages = messages
+    const coreMessages: CoreMessage[] = messages
       .filter((m) => m.role !== "system")
-      .map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      }));
+      .map((m) => {
+        const hasAttachments = m.attachments && m.attachments.length > 0;
+
+        if (hasAttachments && m.role === "user") {
+          // Build multimodal content: images + text.
+          const parts: (TextPart | ImagePart)[] = [];
+
+          for (const att of m.attachments!) {
+            try {
+              const data = readFileSync(att.filePath);
+              parts.push({
+                type: "image" as const,
+                image: data,
+                mimeType: att.type as "image/png" | "image/jpeg" | "image/gif" | "image/webp",
+              });
+            } catch (err) {
+              console.error(`[gemini] Failed to read attachment ${att.filePath}:`, err);
+            }
+          }
+
+          if (m.content) {
+            parts.push({ type: "text" as const, text: m.content });
+          }
+
+          return {
+            role: "user" as const,
+            content: parts,
+          };
+        }
+
+        return {
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        };
+      });
 
     return {
       model: this.google(modelId),
